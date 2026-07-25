@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* ── Chat panel slide-in transitions ──────────────────────────────────────── */
+
+/* The Tailwind translate-x-full / translate-y-full utilities handle the closed
+   state. These keyframes power the ping dot on the chat button (Tailwind's
+   animate-ping uses its own built-in keyframe; this is just a safety fallback). */
+
+@keyframes chat-slide-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes chat-slide-in-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
