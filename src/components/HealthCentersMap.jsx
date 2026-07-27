@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
+import { useDarkMode } from '../hooks/useDarkMode'
 
 // ── Fix Leaflet's default marker icon paths broken by bundlers ────────────────
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
@@ -116,6 +117,44 @@ export default function HealthCentersMap({ open, onClose }) {
   const [userPos, setUserPos]     = useState(null)
   const [searchRadius, setSearchRadius] = useState(20)
 
+  // Get dark mode state
+  const [isDark] = useDarkMode()
+
+  // ── Generate popup content with theme-appropriate colors ─────────────────
+  function createPopupContent(f) {
+    const titleColor = isDark ? '#10b981' : '#059669'  // emerald-500 : emerald-600
+    const labelColor = isDark ? '#94a3b8' : '#64748b'  // slate-400 : slate-500
+    const textColor = isDark ? '#e2e8f0' : '#475569'   // slate-200 : slate-600
+    
+    return `
+      <div style="min-width:180px; color: ${textColor};">
+        <b style="color:${titleColor}">${f.name}</b><br/>
+        <span style="font-size:12px;color:${labelColor}">${f.label}</span><br/>
+        <span style="font-size:12px;color:${textColor}">📏 ${f.dist.toFixed(1)} km away</span>
+        ${f.phone    ? `<br/><span style="font-size:12px;color:${textColor}">📞 ${f.phone}</span>` : ''}
+        ${f.opening  ? `<br/><span style="font-size:12px;color:${textColor}">🕐 ${f.opening}</span>` : ''}
+      </div>
+    `
+  }
+
+  // ── Update popup colors when theme changes ──────────────────────────────────
+  useEffect(() => {
+    if (!mapRef.current || !facilities.length) return
+    
+    // Update all existing popups with new theme colors
+    mapRef.current.eachLayer((layer) => {
+      if (layer instanceof L.Marker && layer !== userMarkerRef.current) {
+        const facility = facilities.find(f => 
+          Math.abs(layer.getLatLng().lat - f.lat) < 0.0001 && 
+          Math.abs(layer.getLatLng().lng - f.lon) < 0.0001
+        )
+        if (facility) {
+          layer.setPopupContent(createPopupContent(facility))
+        }
+      }
+    })
+  }, [isDark, facilities])
+
   // ── Initialise map once ───────────────────────────────────────────────────
   useEffect(() => {
     if (!open || mapRef.current) return
@@ -149,6 +188,21 @@ export default function HealthCentersMap({ open, onClose }) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  // ── Update user marker popup when theme changes ─────────────────────────────
+  useEffect(() => {
+    if (userMarkerRef.current) {
+      const popup = userMarkerRef.current.getPopup()
+      if (popup && popup.getContent()) {
+        const currentContent = popup.getContent()
+        if (currentContent.includes('Your Location')) {
+          userMarkerRef.current.setPopupContent(`<b style="color: ${isDark ? '#10b981' : '#059669'}">📍 Your Location</b>`)
+        } else if (currentContent.includes('Banjul')) {
+          userMarkerRef.current.setPopupContent(`<b style="color: ${isDark ? '#10b981' : '#059669'}">📍 Banjul (default)</b><br/><small style="color: ${isDark ? '#94a3b8' : '#64748b'}">Enable location for better results</small>`)
+        }
+      }
+    }
+  }, [isDark])
 
   // ── Locate user + fetch facilities ───────────────────────────────────────
   function locateUser(map) {
@@ -241,15 +295,7 @@ export default function HealthCentersMap({ open, onClose }) {
       parsed.forEach((f) => {
         const marker = L.marker([f.lat, f.lon], { icon: f.icon })
           .addTo(map)
-          .bindPopup(
-            `<div style="min-width:180px">
-              <b style="color:#059669">${f.name}</b><br/>
-              <span style="font-size:12px;color:#64748b">${f.label}</span><br/>
-              <span style="font-size:12px">📏 ${f.dist.toFixed(1)} km away</span>
-              ${f.phone    ? `<br/><span style="font-size:12px">📞 ${f.phone}</span>` : ''}
-              ${f.opening  ? `<br/><span style="font-size:12px">🕐 ${f.opening}</span>` : ''}
-            </div>`
-          )
+          .bindPopup(createPopupContent(f))
         marker.on('click', () => setSelected(f))
       })
 
@@ -390,15 +436,15 @@ export default function HealthCentersMap({ open, onClose }) {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate text-[13px] font-semibold text-slate-800">{f.name}</p>
-                    <p className="mt-0.5 text-[11px] text-slate-500">{f.label}</p>
+                    <p className="truncate text-[13px] font-semibold text-slate-800 dark:text-white">{f.name}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{f.label}</p>
                   </div>
                   <span className="flex-shrink-0 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-semibold text-green-700">
                     {f.dist.toFixed(1)} km
                   </span>
                 </div>
-                {f.phone && <p className="mt-1 text-[11px] text-slate-400">📞 {f.phone}</p>}
-                {f.opening && <p className="mt-0.5 text-[11px] text-slate-400 truncate">🕐 {f.opening}</p>}
+                {f.phone && <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">📞 {f.phone}</p>}
+                {f.opening && <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 truncate">🕐 {f.opening}</p>}
               </button>
             ))}
           </div>
@@ -410,12 +456,12 @@ export default function HealthCentersMap({ open, onClose }) {
 
           {/* Loading overlay */}
           {(status === 'locating' || status === 'loading') && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 backdrop-blur-sm z-[999]">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm z-[999]">
               <svg className="h-10 w-10 animate-spin text-green-600" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
               </svg>
-              <p className="mt-3 text-sm font-medium text-slate-600">
+              <p className="mt-3 text-sm font-medium text-slate-600 dark:text-slate-300">
                 {status === 'locating' ? 'Getting your location…' : 'Loading nearby health facilities…'}
               </p>
             </div>
@@ -426,10 +472,10 @@ export default function HealthCentersMap({ open, onClose }) {
             <div className="absolute bottom-4 left-4 right-4 z-[999] rounded-2xl bg-white p-4 shadow-xl md:hidden">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-semibold text-slate-800">{selected.name}</p>
-                  <p className="text-sm text-slate-500">{selected.label} · {selected.dist.toFixed(1)} km away</p>
-                  {selected.phone   && <p className="mt-1 text-sm text-slate-500">📞 {selected.phone}</p>}
-                  {selected.opening && <p className="text-sm text-slate-500">🕐 {selected.opening}</p>}
+                  <p className="font-semibold text-slate-800 dark:text-white">{selected.name}</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{selected.label} · {selected.dist.toFixed(1)} km away</p>
+                  {selected.phone   && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">📞 {selected.phone}</p>}
+                  {selected.opening && <p className="text-sm text-slate-500 dark:text-slate-400">🕐 {selected.opening}</p>}
                 </div>
                 <button onClick={() => setSelected(null)} className="ml-2 rounded-full p-1 text-slate-400 hover:bg-slate-100">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4 w-4">
@@ -449,7 +495,7 @@ export default function HealthCentersMap({ open, onClose }) {
           {/* Mobile facility count badge */}
           {status === 'ready' && (
             <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[999] md:hidden">
-              <span className="rounded-full bg-white/90 px-4 py-1.5 text-xs font-semibold text-slate-700 shadow-md">
+              <span className="rounded-full bg-white/90 dark:bg-slate-800/90 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-md">
                 {facilities.length} facilities within {searchRadius} km
               </span>
             </div>

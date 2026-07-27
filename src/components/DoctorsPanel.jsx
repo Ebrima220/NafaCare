@@ -7,7 +7,6 @@ const DOCTORS = [
     id: 1,
     name: 'Dr. Aminata Touray',
     specialty: 'General Practitioner',
-    available: true,
     phone: '+220 772 1234',
     whatsapp: '2207721234',
     email: 'a.touray@nafacare.gm',
@@ -20,7 +19,6 @@ const DOCTORS = [
     id: 2,
     name: 'Dr. Ousman Jallow',
     specialty: 'Paediatrician',
-    available: true,
     phone: '+220 990 5678',
     whatsapp: '2209905678',
     email: 'o.jallow@nafacare.gm',
@@ -33,7 +31,6 @@ const DOCTORS = [
     id: 3,
     name: 'Dr. Fatou Ceesay',
     specialty: 'Gynaecologist & Obstetrician',
-    available: false,
     phone: '+220 667 9012',
     whatsapp: '2206679012',
     email: 'f.ceesay@nafacare.gm',
@@ -46,7 +43,6 @@ const DOCTORS = [
     id: 4,
     name: 'Dr. Lamin Sanneh',
     specialty: 'Internal Medicine',
-    available: true,
     phone: '+220 748 3456',
     whatsapp: '2207483456',
     email: 'l.sanneh@nafacare.gm',
@@ -59,7 +55,6 @@ const DOCTORS = [
     id: 5,
     name: 'Dr. Mariama Bah',
     specialty: 'Dermatologist',
-    available: true,
     phone: '+220 559 7890',
     whatsapp: '2205597890',
     email: 'm.bah@nafacare.gm',
@@ -72,7 +67,6 @@ const DOCTORS = [
     id: 6,
     name: 'Dr. Ebrima Baldeh',
     specialty: 'Dentist',
-    available: false,
     phone: '+220 334 2109',
     whatsapp: '2203342109',
     email: 'e.baldeh@nafacare.gm',
@@ -98,47 +92,41 @@ function DoctorCard({ doctor }) {
   )}`
 
   return (
-    <div className="overflow-hidden rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md dark:bg-slate-800">
-      <div className="p-4">
-        {/* Top: avatar + info + badge */}
-        <div className="flex items-start gap-3">
-          <div className={`flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl ${doctor.color} text-lg font-extrabold text-white shadow-sm`}>
+    <div className="overflow-hidden rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md dark:bg-slate-800 max-w-xs mx-auto">
+      <div className="p-3">
+        {/* Top: avatar + info */}
+        <div className="flex items-start gap-2.5">
+          <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${doctor.color} text-xs font-extrabold text-white shadow-sm`}>
             {doctor.avatar}
           </div>
 
           <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <h3 className="truncate text-[14px] font-bold text-slate-800 leading-tight dark:text-white">{doctor.name}</h3>
-                <p className="mt-0.5 text-[12px] font-semibold text-green-600 dark:text-green-400">{doctor.specialty}</p>
-                <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400 dark:text-slate-500">
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 flex-shrink-0">
-                    <path fillRule="evenodd" d="m7.539 14.841.003.003.002.002a.755.755 0 0 0 .912 0l.002-.002.003-.003.012-.009a5.57 5.57 0 0 0 .19-.153 15.588 15.588 0 0 0 2.046-2.082c1.101-1.362 2.291-3.342 2.291-5.597A5 5 0 0 0 3 7c0 2.255 1.19 4.235 2.292 5.597a15.591 15.591 0 0 0 2.046 2.082 8.916 8.916 0 0 0 .19.153l.012.01ZM8 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
-                  </svg>
-                  {doctor.location}
-                </p>
-              </div>
-              <span className={`flex-shrink-0 flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${doctor.available ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${doctor.available ? 'bg-green-500 animate-pulse' : 'bg-slate-300'}`} />
-                {doctor.available ? 'Available' : 'Busy'}
-              </span>
+            <div className="min-w-0">
+              <h3 className="truncate text-[13px] font-bold text-slate-800 leading-tight dark:text-white">{doctor.name}</h3>
+              <p className="mt-0.5 text-[11px] font-semibold text-green-600 dark:text-green-400">{doctor.specialty}</p>
+              <p className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-2.5 w-2.5 flex-shrink-0">
+                  <path fillRule="evenodd" d="m7.539 14.841.003.003.002.002a.755.755 0 0 0 .912 0l.002-.002.003-.003.012-.009a5.57 5.57 0 0 0 .19-.153 15.588 15.588 0 0 0 2.046-2.082c1.101-1.362 2.291-3.342 2.291-5.597A5 5 0 0 0 3 7c0 2.255 1.19 4.235 2.292 5.597a15.591 15.591 0 0 0 2.046 2.082 8.916 8.916 0 0 0 .19.153l.012.01ZM8 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
+                </svg>
+                {doctor.location}
+              </p>
             </div>
           </div>
         </div>
 
         {/* Bio */}
-        <p className="mt-3 text-[12px] leading-relaxed text-slate-500 border-t border-slate-50 pt-3 dark:text-slate-400 dark:border-slate-700">{doctor.bio}</p>
+        <p className="mt-2.5 text-[11px] leading-relaxed text-slate-500 border-t border-slate-50 pt-2.5 dark:text-slate-400 dark:border-slate-700">{doctor.bio}</p>
 
         {/* Contact row — plain icon + text, no card */}
-        <div className="mt-3 space-y-1.5 border-t border-slate-100 pt-3 dark:border-slate-700">
-          <a href={`tel:${doctor.phone}`} className="flex items-center gap-2 text-[12px] text-slate-500 hover:text-green-600 transition-colors dark:text-slate-400 dark:hover:text-green-400">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 flex-shrink-0 text-slate-400 dark:text-slate-500">
+        <div className="mt-2.5 space-y-1 border-t border-slate-100 pt-2.5 dark:border-slate-700">
+          <a href={`tel:${doctor.phone}`} className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-green-600 transition-colors dark:text-slate-400 dark:hover:text-green-400">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3 flex-shrink-0 text-slate-400 dark:text-slate-500">
               <path fillRule="evenodd" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h1.148a1.5 1.5 0 0 1 1.465 1.175l.716 3.223a1.5 1.5 0 0 1-1.052 1.767l-.933.267c-.41.117-.643.555-.48.95a11.542 11.542 0 0 0 6.254 6.254c.395.163.833-.07.95-.48l.267-.933a1.5 1.5 0 0 1 1.767-1.052l3.223.716A1.5 1.5 0 0 1 18 15.352V16.5a1.5 1.5 0 0 1-1.5 1.5H15c-1.149 0-2.263-.15-3.326-.43A13.022 13.022 0 0 1 2.43 8.326 13.019 13.019 0 0 1 2 5V3.5Z" clipRule="evenodd" />
             </svg>
             {doctor.phone}
           </a>
-          <a href={`mailto:${doctor.email}`} className="flex items-center gap-2 text-[12px] text-slate-500 hover:text-green-600 transition-colors dark:text-slate-400 dark:hover:text-green-400">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 flex-shrink-0 text-slate-400 dark:text-slate-500">
+          <a href={`mailto:${doctor.email}`} className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-green-600 transition-colors dark:text-slate-400 dark:hover:text-green-400">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3 flex-shrink-0 text-slate-400 dark:text-slate-500">
               <path d="M3 4a2 2 0 0 0-2 2v1.161l8.441 4.221a1.25 1.25 0 0 0 1.118 0L19 7.162V6a2 2 0 0 0-2-2H3Z" />
               <path d="m19 8.839-7.77 3.885a2.75 2.75 0 0 1-2.46 0L1 8.839V14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.839Z" />
             </svg>
@@ -151,7 +139,7 @@ function DoctorCard({ doctor }) {
           href={waUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-3 inline-flex items-center justify-center rounded-xl bg-[#25D366] p-2.5 shadow-sm transition hover:bg-[#1fbd5c] active:scale-[0.98]"
+          className="mt-2.5 inline-flex items-center justify-center rounded-lg bg-[#25D366] p-2 shadow-sm transition hover:bg-[#1fbd5c] active:scale-[0.98]"
           aria-label="Chat on WhatsApp"
         >
           <WhatsAppIcon />
@@ -229,12 +217,12 @@ export default function DoctorsPanel({ open, onClose }) {
         </div>
 
         {/* ── Disclaimer ── */}
-        <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-4 py-2 dark:border-amber-900/40 dark:bg-amber-900/20">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 flex-shrink-0 text-amber-500">
-            <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+        <div className="flex items-center gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2 dark:border-blue-900/40 dark:bg-blue-900/20">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 flex-shrink-0 text-blue-500">
+            <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clipRule="evenodd" />
           </svg>
-          <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-snug">
-            NafaCare connects you to professionals — always confirm credentials before consulting.
+          <p className="text-[11px] text-blue-700 dark:text-blue-400 leading-snug">
+            Please verify health personnel credentials before sharing personal information.
           </p>
         </div>
 
