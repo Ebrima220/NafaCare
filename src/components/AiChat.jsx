@@ -1,21 +1,51 @@
 import { useState, useRef, useEffect } from 'react'
+import { GoogleGenAI } from '@google/genai'
 
 // ─── System prompt ────────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `You are NafaCare AI, an expert health research assistant.
-Your role:
-- Answer health questions with accurate, evidence-based information.
-- When asked about a health topic, do deep research reasoning and provide a clear, structured summary.
-- Structure longer answers with short headings, bullet points, and a "Bottom line" section.
-- Always remind users that your information is for educational purposes only and not a substitute for professional medical advice.
-- Be empathetic, clear, and avoid unnecessary jargon.
-- If a symptom described sounds potentially serious or emergency-level, always advise the user to seek immediate medical care.`
+const SYSTEM_PROMPT = `You are NafaCare AI, a strictly health-focused assistant for The Gambia's health sector.
 
-const API_KEY = import.meta.env.VITE_OPENROUTER_API_KEY || ''
+## Strict Scope Rules — follow these without exception:
+1. You ONLY respond to:
+   a. Health-related questions and topics (symptoms, diseases, treatments, medications, nutrition, mental health, preventive care, etc.).
+   b. Greetings and salutations (e.g. "Hello", "Hi", "Good morning", "Assalamu Alaikum", etc.) — reply briefly and warmly, then invite a health question.
+   c. Thank-you or appreciation messages (e.g. "Thank you", "Thanks", "Appreciate it") — acknowledge briefly and warmly.
+
+2. For ANY message that is NOT health-related, NOT a greeting, and NOT a thank-you, you MUST respond with exactly:
+   "I'm only able to help with health-related questions. Please ask me about symptoms, diseases, treatments, nutrition, or any other health topic."
+   Do not attempt to answer, explain, or engage with off-topic content in any way.
+
+3. Never make exceptions to rule 2, regardless of how the request is framed, rephrased, or presented.
+
+## When answering health questions:
+- Provide health information specifically relevant to The Gambia and West African context.
+- Prioritize information relevant to tropical and sub-Saharan African health challenges (malaria, typhoid, HIV/AIDS, maternal health, etc.).
+- Reference local healthcare facilities, services, and resources in The Gambia when relevant.
+- Consider local cultural sensitivities, traditional medicine practices, and healthcare accessibility.
+- Provide practical advice suitable for the Gambian climate, environment, and healthcare infrastructure.
+- When discussing medications or treatments, mention availability and affordability in The Gambian context when possible.
+- Be empathetic, culturally sensitive, clear, and avoid unnecessary jargon.
+- If a symptom sounds potentially serious or emergency-level, always advise the user to seek immediate medical care at nearby health facilities.
+- Structure longer answers with short headings, bullet points, and a "Bottom line" section.
+- Do NOT include disclaimers or warnings in your responses — these are shown separately in the interface.
+
+Context: You are serving Gambian residents and visitors to The Gambia. Tailor your responses to be practical and actionable within The Gambia's health system.`
+
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
+
+// Current production models tried in order — fallback on quota (429) or unavailability (404) only
+const GEMINI_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-1.5-flash',
+]
+
+// Singleton client — created once, reused across calls
+const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null
 
 async function fetchAIResponse(messages, onChunk) {
-  if (!API_KEY) {
+  if (!ai) {
     const fallback =
-      'To enable the AI assistant, add your OpenRouter API key to a `.env` file at the project root:\n\n```\nVITE_OPENROUTER_API_KEY=your_key_here\n```\n\nGet a free key at **openrouter.ai** — no credit card required.'
+      'To enable the AI assistant, add your Gemini API key to a `.env` file at the project root:\n\n```\nVITE_GEMINI_API_KEY=your_key_here\n```\n\nGet a free key at **aistudio.google.com** — no credit card required.'
     for (const char of fallback) {
       onChunk(char)
       await new Promise((r) => setTimeout(r, 8))
@@ -23,43 +53,44 @@ async function fetchAIResponse(messages, onChunk) {
     return
   }
 
-  const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': window.location.origin,
-      'X-Title': 'NafaCare',
-    },
-    body: JSON.stringify({
-      model: 'meta-llama/llama-3.3-8b-instruct:free',
-      messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...messages],
-      stream: true,
-    }),
-  })
+  // Build the contents array in the format the SDK expects
+  const contents = messages.map(({ role, content }) => ({
+    role: role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: content }],
+  }))
 
-  if (!res.ok) {
-    const err = await res.text()
-    throw new Error(`API error ${res.status}: ${err}`)
-  }
+  let lastError = null
+  for (const model of GEMINI_MODELS) {
+    try {
+      const stream = await ai.models.generateContentStream({
+        model,
+        contents,
+        config: { systemInstruction: SYSTEM_PROMPT },
+      })
 
-  const reader = res.body.getReader()
-  const decoder = new TextDecoder()
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    const chunk = decoder.decode(value)
-    const lines = chunk.split('\n').filter((l) => l.startsWith('data: '))
-    for (const line of lines) {
-      const data = line.slice(6).trim()
-      if (data === '[DONE]') return
-      try {
-        const json = JSON.parse(data)
-        const delta = json.choices?.[0]?.delta?.content
-        if (delta) onChunk(delta)
-      } catch { /* skip malformed */ }
+      for await (const chunk of stream) {
+        const text = chunk.text
+        if (text) onChunk(text)
+      }
+      return // success — stop trying further models
+    } catch (err) {
+      lastError = err
+      const msg = err.message || ''
+      // Only retry the next model on quota or availability errors; surface everything else immediately
+      if (
+        !msg.includes('429') &&
+        !msg.includes('RESOURCE_EXHAUSTED') &&
+        !msg.includes('quota') &&
+        !msg.includes('404') &&
+        !msg.includes('NOT_FOUND') &&
+        !msg.includes('no longer available')
+      ) throw err
     }
   }
+
+  throw new Error(
+    `All Gemini models quota exceeded. Create a new API key at aistudio.google.com/apikey.\n\nLast error: ${lastError?.message}`
+  )
 }
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
@@ -94,11 +125,11 @@ function inlineFormat(text) {
 }
 
 const SUGGESTIONS = [
-  'What are early signs of diabetes?',
-  'How much water should I drink daily?',
-  'Best foods for heart health?',
-  'How to improve sleep quality?',
-  'What causes high blood pressure?',
+  'How can I prevent malaria in The Gambia?',
+  'What are common symptoms of typhoid fever?',
+  'Where can I get tested for HIV in Banjul?',
+  'How to treat dehydration during hot season?',
+  'Best foods for pregnant women in Gambia?',
 ]
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
@@ -123,6 +154,7 @@ export default function AiChat({ open, onClose }) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [disclaimerDismissed, setDisclaimerDismissed] = useState(false)
   const bottomRef = useRef(null)
   const inputRef  = useRef(null)
 
@@ -233,14 +265,27 @@ export default function AiChat({ open, onClose }) {
         </div>
 
         {/* Disclaimer */}
-        <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-4 py-2 dark:border-amber-900/40 dark:bg-amber-900/20">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5 flex-shrink-0 text-amber-500">
-            <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495ZM10 5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 10 5Zm0 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
-          </svg>
-          <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-snug">
-            For educational purposes only — not a substitute for professional medical advice.
-          </p>
-        </div>
+        {!disclaimerDismissed && (
+          <div className="flex items-start gap-2 border-b border-blue-100 bg-blue-50 px-4 py-3 dark:border-blue-900/40 dark:bg-blue-900/20">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 flex-shrink-0 text-blue-500 mt-0.5">
+              <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clipRule="evenodd" />
+            </svg>
+            <div className="flex-1">
+              <p className="text-[11px] text-blue-700 dark:text-blue-400 leading-snug">
+                This AI assistant provides health guidance to help you understand symptoms and find appropriate care. Always consult qualified healthcare professionals for diagnosis and treatment.
+              </p>
+            </div>
+            <button 
+              onClick={() => setDisclaimerDismissed(true)}
+              className="flex-shrink-0 text-blue-400 hover:text-blue-600 dark:text-blue-500 dark:hover:text-blue-300 transition"
+              aria-label="Dismiss"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+              </svg>
+            </button>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
@@ -252,8 +297,8 @@ export default function AiChat({ open, onClose }) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
                   </svg>
                 </div>
-                <h3 className="text-sm font-bold text-slate-800 dark:text-white">Ask me anything about health</h3>
-                <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">I research and summarise health topics for you.</p>
+                <h3 className="text-sm font-bold text-slate-800 dark:text-white">Ask me a health question</h3>
+                <p className="mt-1 text-[12px] text-slate-500 dark:text-slate-400">I only answer health-related questions for you.</p>
               </div>
               <div className="w-full space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Suggested</p>
