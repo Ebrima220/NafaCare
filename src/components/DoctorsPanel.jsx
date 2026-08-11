@@ -1,6 +1,7 @@
 // ── DoctorsPanel ──────────────────────────────────────────────────────────────
 // Mobile: professional bottom sheet — 92dvh, rounded top corners, drag handle
 // Desktop: right sidebar sliding in from the right
+import { useEffect } from 'react'
 
 const DOCTORS = [
   {
@@ -152,9 +153,10 @@ function DoctorCard({ doctor }) {
 // ── Main panel ────────────────────────────────────────────────────────────────
 export default function DoctorsPanel({ open, onClose }) {
   // Lock body scroll when open
-  if (typeof window !== 'undefined') {
+  useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
-  }
+    return () => { document.body.style.overflow = '' }
+  }, [open])
 
   return (
     <>

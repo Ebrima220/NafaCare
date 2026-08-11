@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from 'react'
-import { GoogleGenAI } from '@google/genai'
 
 // ─── System prompt ────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT = `You are NafaCare AI, a strictly health-focused assistant for The Gambia's health sector.
@@ -32,18 +31,50 @@ Context: You are serving Gambian residents and visitors to The Gambia. Tailor yo
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
 
-// Current production models tried in order — fallback on quota (429) or unavailability (404) only
-const GEMINI_MODELS = [
-  'gemini-3.5-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-1.5-flash',
-]
+// Preferred model substrings — we dynamically pick from what the key can actually access
+const MODEL_PREFERENCE = ['2.5-flash', '2.0-flash', '2.5-pro', '1.5-flash', 'flash', 'pro']
 
-// Singleton client — created once, reused across calls
-const ai = API_KEY ? new GoogleGenAI({ apiKey: API_KEY }) : null
+// Cache discovered models so we only call ListModels once per session
+let _discoveredModels = null
 
+async function getAvailableModels() {
+  if (_discoveredModels) return _discoveredModels
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=50&key=${API_KEY}`
+    )
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      if (res.status === 400 || res.status === 401 || res.status === 403)
+        throw new Error(`API key rejected (${res.status}): ${err?.error?.message || 'invalid key'}. Get a valid key at aistudio.google.com/apikey`)
+      return [] // fall through to hardcoded fallback
+    }
+    const data = await res.json()
+    const allModels = (data.models || [])
+      .filter(m =>
+        (m.supportedGenerationMethods || []).includes('generateContent') &&
+        m.name.includes('gemini')
+      )
+      .map(m => m.name.replace('models/', ''))
+
+    // Sort by preference order
+    allModels.sort((a, b) => {
+      const ai = MODEL_PREFERENCE.findIndex(p => a.includes(p))
+      const bi = MODEL_PREFERENCE.findIndex(p => b.includes(p))
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
+    })
+
+    _discoveredModels = allModels.length > 0 ? allModels : null
+    return _discoveredModels || []
+  } catch (err) {
+    if (err.message?.includes('API key rejected')) throw err
+    return []
+  }
+}
+
+// ── REST API streaming helper (no SDK dependency) ─────────────────────────────
 async function fetchAIResponse(messages, onChunk) {
-  if (!ai) {
+  if (!API_KEY) {
     const fallback =
       'To enable the AI assistant, add your Gemini API key to a `.env` file at the project root:\n\n```\nVITE_GEMINI_API_KEY=your_key_here\n```\n\nGet a free key at **aistudio.google.com** — no credit card required.'
     for (const char of fallback) {
@@ -53,43 +84,70 @@ async function fetchAIResponse(messages, onChunk) {
     return
   }
 
-  // Build the contents array in the format the SDK expects
-  const contents = messages.map(({ role, content }) => ({
-    role: role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: content }],
-  }))
+  const body = JSON.stringify({
+    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: messages.map(({ role, content }) => ({
+      role: role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: content }],
+    })),
+    generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+  })
+
+  // Auto-discover what models this key can actually use
+  const models = await getAvailableModels()
+  if (models.length === 0)
+    throw new Error(
+      'No Gemini models found for your API key. Your key may be invalid or restricted.\n\nPlease get a fresh key at aistudio.google.com/apikey and update VITE_GEMINI_API_KEY in your .env file.'
+    )
 
   let lastError = null
-  for (const model of GEMINI_MODELS) {
+  for (const model of models) {
     try {
-      const stream = await ai.models.generateContentStream({
-        model,
-        contents,
-        config: { systemInstruction: SYSTEM_PROMPT },
-      })
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${API_KEY}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }
+      )
 
-      for await (const chunk of stream) {
-        const text = chunk.text
-        if (text) onChunk(text)
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}))
+        lastError = new Error(JSON.stringify(errJson))
+        if (res.status === 404 || res.status === 429 || res.status === 503) continue
+        if (res.status === 401 || res.status === 403)
+          throw new Error(`Invalid API key (${res.status}). Please replace VITE_GEMINI_API_KEY in your .env file with a valid key from aistudio.google.com/apikey.`)
+        throw lastError
       }
-      return // success — stop trying further models
+
+      // Stream SSE response
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const jsonStr = line.slice(6).trim()
+          if (!jsonStr || jsonStr === '[DONE]') continue
+          try {
+            const json = JSON.parse(jsonStr)
+            const text = json?.candidates?.[0]?.content?.parts?.[0]?.text
+            if (text) onChunk(text)
+          } catch { /* ignore malformed chunks */ }
+        }
+      }
+      return // success
     } catch (err) {
+      if (err.message?.includes('Invalid API key') || err.message?.includes('API key rejected')) throw err
       lastError = err
-      const msg = err.message || ''
-      // Only retry the next model on quota or availability errors; surface everything else immediately
-      if (
-        !msg.includes('429') &&
-        !msg.includes('RESOURCE_EXHAUSTED') &&
-        !msg.includes('quota') &&
-        !msg.includes('404') &&
-        !msg.includes('NOT_FOUND') &&
-        !msg.includes('no longer available')
-      ) throw err
     }
   }
 
   throw new Error(
-    `All Gemini models quota exceeded. Create a new API key at aistudio.google.com/apikey.\n\nLast error: ${lastError?.message}`
+    `All Gemini models unavailable.\n\nLast error: ${lastError?.message}`
   )
 }
 

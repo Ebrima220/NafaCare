@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useDarkMode } from './hooks/useDarkMode'
 import Navbar from './components/Navbar'
 import Hero from './components/Hero'
 import Features from './components/Features'
@@ -15,9 +14,6 @@ export default function App() {
   const [chatOpen,    setChatOpen]    = useState(false)
   const [mapOpen,     setMapOpen]     = useState(false)
   const [doctorsOpen, setDoctorsOpen] = useState(false)
-
-  // Initialize dark mode
-  useDarkMode()
 
   return (
     <>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import L from 'leaflet'
 import { useDarkMode } from '../hooks/useDarkMode'
 
@@ -153,7 +153,7 @@ export default function HealthCentersMap({ open, onClose }) {
         }
       }
     })
-  }, [isDark, facilities])
+  }, [isDark, facilities, createPopupContent])
 
   // ── Initialise map once ───────────────────────────────────────────────────
   useEffect(() => {
