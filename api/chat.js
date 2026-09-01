@@ -42,7 +42,7 @@ export default async function handler(req, res) {
 
     if (!apiKey) {
       return res.status(500).json({
-        error: 'AI is not configured for this site. Add GEMINI_API_KEY in your Vercel environment variables.',
+        error: 'The AI assistant is currently unavailable. Please try again in a few moments.',
       })
     }
 
@@ -66,10 +66,8 @@ export default async function handler(req, res) {
     )
 
     if (!response.ok) {
-      const errorPayload = await response.json().catch(() => ({}))
-      const errorDetail = errorPayload?.error?.message || 'The AI service rejected the request.'
       return res.status(response.status).json({
-        error: `The AI service is unavailable right now. ${errorDetail}`,
+        error: 'The AI assistant is currently unavailable. Please try again in a few moments.',
       })
     }
 

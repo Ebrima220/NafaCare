@@ -36,12 +36,19 @@ function getFriendlyAiError(error) {
     .replace(/\s+/g, ' ')
     .trim()
 
-  if (!message) return 'The AI assistant is temporarily unavailable. Please try again in a moment.'
+  if (!message) return 'The AI assistant is currently unavailable. Please try again in a few moments.'
 
   const lower = message.toLowerCase()
 
-  if (lower.includes('api key') || lower.includes('invalid key') || lower.includes('rejected') || lower.includes('gemini')) {
-    return 'The AI is not configured correctly on this site. Please add a valid Gemini API key in Vercel and try again.'
+  if (
+    lower.includes('not configured') ||
+    lower.includes('api key') ||
+    lower.includes('invalid key') ||
+    lower.includes('rejected') ||
+    lower.includes('gemini') ||
+    lower.includes('configured correctly on this site')
+  ) {
+    return 'The AI assistant is currently unavailable. Please try again in a few moments.'
   }
 
   if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests')) {
@@ -49,7 +56,7 @@ function getFriendlyAiError(error) {
   }
 
   if (lower.includes('503') || lower.includes('unavailable') || lower.includes('fetch') || lower.includes('network') || lower.includes('timeout')) {
-    return 'The AI service is temporarily unavailable. Please try again in a few moments.'
+    return 'The AI assistant is currently unavailable. Please try again in a few moments.'
   }
 
   return 'Something went wrong while generating the response. Please try again.'
