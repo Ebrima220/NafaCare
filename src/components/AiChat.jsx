@@ -29,126 +29,62 @@ const SYSTEM_PROMPT = `You are NafaCare AI, a strictly health-focused assistant 
 
 Context: You are serving Gambian residents and visitors to The Gambia. Tailor your responses to be practical and actionable within The Gambia's health system.`
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || ''
+function getFriendlyAiError(error) {
+  const raw = error?.message || String(error || '')
+  const message = raw
+    .replace(/https?:\/\/[^\s]+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 
-// Preferred model substrings — we dynamically pick from what the key can actually access
-const MODEL_PREFERENCE = ['2.5-flash', '2.0-flash', '2.5-pro', '1.5-flash', 'flash', 'pro']
+  if (!message) return 'The AI assistant is temporarily unavailable. Please try again in a moment.'
 
-// Cache discovered models so we only call ListModels once per session
-let _discoveredModels = null
+  const lower = message.toLowerCase()
 
-async function getAvailableModels() {
-  if (_discoveredModels) return _discoveredModels
-  try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=50&key=${API_KEY}`
-    )
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}))
-      if (res.status === 400 || res.status === 401 || res.status === 403)
-        throw new Error(`API key rejected (${res.status}): ${err?.error?.message || 'invalid key'}. Get a valid key at aistudio.google.com/apikey`)
-      return [] // fall through to hardcoded fallback
-    }
-    const data = await res.json()
-    const allModels = (data.models || [])
-      .filter(m =>
-        (m.supportedGenerationMethods || []).includes('generateContent') &&
-        m.name.includes('gemini')
-      )
-      .map(m => m.name.replace('models/', ''))
-
-    // Sort by preference order
-    allModels.sort((a, b) => {
-      const ai = MODEL_PREFERENCE.findIndex(p => a.includes(p))
-      const bi = MODEL_PREFERENCE.findIndex(p => b.includes(p))
-      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
-    })
-
-    _discoveredModels = allModels.length > 0 ? allModels : null
-    return _discoveredModels || []
-  } catch (err) {
-    if (err.message?.includes('API key rejected')) throw err
-    return []
+  if (lower.includes('api key') || lower.includes('invalid key') || lower.includes('rejected') || lower.includes('gemini')) {
+    return 'The AI is not configured correctly on this site. Please add a valid Gemini API key in Vercel and try again.'
   }
+
+  if (lower.includes('429') || lower.includes('rate limit') || lower.includes('too many requests')) {
+    return 'The AI service is busy right now. Please wait a moment and try again.'
+  }
+
+  if (lower.includes('503') || lower.includes('unavailable') || lower.includes('fetch') || lower.includes('network') || lower.includes('timeout')) {
+    return 'The AI service is temporarily unavailable. Please try again in a few moments.'
+  }
+
+  return 'Something went wrong while generating the response. Please try again.'
 }
 
-// ── REST API streaming helper (no SDK dependency) ─────────────────────────────
 async function fetchAIResponse(messages, onChunk) {
-  if (!API_KEY) {
-    const fallback =
-      'To enable the AI assistant, add your Gemini API key to a `.env` file at the project root:\n\n```\nVITE_GEMINI_API_KEY=your_key_here\n```\n\nGet a free key at **aistudio.google.com** — no credit card required.'
-    for (const char of fallback) {
-      onChunk(char)
-      await new Promise((r) => setTimeout(r, 8))
-    }
-    return
-  }
-
-  const body = JSON.stringify({
-    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-    contents: messages.map(({ role, content }) => ({
-      role: role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: content }],
-    })),
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+  const response = await fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
   })
 
-  // Auto-discover what models this key can actually use
-  const models = await getAvailableModels()
-  if (models.length === 0)
-    throw new Error(
-      'No Gemini models found for your API key. Your key may be invalid or restricted.\n\nPlease get a fresh key at aistudio.google.com/apikey and update VITE_GEMINI_API_KEY in your .env file.'
-    )
-
-  let lastError = null
-  for (const model of models) {
+  if (!response.ok) {
+    let payload = {}
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${API_KEY}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }
-      )
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}))
-        lastError = new Error(JSON.stringify(errJson))
-        if (res.status === 404 || res.status === 429 || res.status === 503) continue
-        if (res.status === 401 || res.status === 403)
-          throw new Error(`Invalid API key (${res.status}). Please replace VITE_GEMINI_API_KEY in your .env file with a valid key from aistudio.google.com/apikey.`)
-        throw lastError
-      }
-
-      // Stream SSE response
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const jsonStr = line.slice(6).trim()
-          if (!jsonStr || jsonStr === '[DONE]') continue
-          try {
-            const json = JSON.parse(jsonStr)
-            const text = json?.candidates?.[0]?.content?.parts?.[0]?.text
-            if (text) onChunk(text)
-          } catch { /* ignore malformed chunks */ }
-        }
-      }
-      return // success
-    } catch (err) {
-      if (err.message?.includes('Invalid API key') || err.message?.includes('API key rejected')) throw err
-      lastError = err
+      payload = await response.json()
+    } catch {
+      payload = {}
     }
+
+    const message = payload.error || 'The AI assistant is temporarily unavailable. Please try again.'
+    throw new Error(message)
   }
 
-  throw new Error(
-    `All Gemini models unavailable.\n\nLast error: ${lastError?.message}`
-  )
+  const data = await response.json().catch(() => ({}))
+  const text = typeof data.text === 'string' ? data.text : ''
+
+  if (!text) {
+    throw new Error('The AI assistant returned an empty response. Please try again.')
+  }
+
+  for (const char of text) {
+    onChunk(char)
+    await new Promise((resolve) => setTimeout(resolve, 8))
+  }
 }
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
@@ -243,8 +179,23 @@ export default function AiChat({ open, onClose }) {
           return copy
         }),
       )
-    } catch (e) { setError(e.message) }
-    finally {
+    } catch (e) {
+      const message = getFriendlyAiError(e)
+      setError(message)
+      setMessages((prev) => {
+        const copy = [...prev]
+        const last = copy[copy.length - 1]
+        if (last && last.role === 'assistant') {
+          copy[copy.length - 1] = {
+            ...last,
+            content: message,
+            streaming: false,
+            error: true,
+          }
+        }
+        return copy
+      })
+    } finally {
       setMessages((prev) => {
         const copy = [...prev]
         const last = copy[copy.length - 1]
