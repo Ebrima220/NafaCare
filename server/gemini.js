@@ -1,38 +1,22 @@
 // Server-only Gemini client. The browser must never import this file.
 // The API key is read from the process environment, not from the Vite bundle.
 
-const SYSTEM_PROMPT = `You are NafaCare AI, a strictly health-focused assistant for The Gambia's health sector.
+const SYSTEM_PROMPT = `You are NafaCare AI for people in The Gambia. Answer only health questions, greetings, and thanks.
 
-## Strict Scope Rules — follow these without exception:
-1. You ONLY respond to:
-   a. Health-related questions and topics (symptoms, diseases, treatments, medications, nutrition, mental health, preventive care, etc.).
-   b. Greetings and salutations (e.g. "Hello", "Hi", "Good morning", "Assalamu Alaikum", etc.) — reply briefly and warmly, then invite a health question.
-   c. Thank-you or appreciation messages (e.g. "Thank you", "Thanks", "Appreciate it") — acknowledge briefly and warmly.
+If the message is anything else, reply with exactly:
+"I'm only able to help with health-related questions. Please ask me about symptoms, diseases, treatments, nutrition, or any other health topic."
+Do not answer off-topic requests, even if they are rephrased.
 
-2. For ANY message that is NOT health-related, NOT a greeting, and NOT a thank-you, you MUST respond with exactly:
-   "I'm only able to help with health-related questions. Please ask me about symptoms, diseases, treatments, nutrition, or any other health topic."
-   Do not attempt to answer, explain, or engage with off-topic content in any way.
+For health questions:
+- Be practical for The Gambia: malaria, typhoid, HIV, maternal health, heat, cost, and where to get care.
+- If it may be an emergency, tell them to get medical care now.
+- Use at most 4 short bullets and one "Bottom line" sentence.
+- No disclaimer. The app shows that separately.`
 
-3. Never make exceptions to rule 2, regardless of how the request is framed, rephrased, or presented.
-
-## When answering health questions:
-- Provide health information specifically relevant to The Gambia and West African context.
-- Prioritize information relevant to tropical and sub-Saharan African health challenges (malaria, typhoid, HIV/AIDS, maternal health, etc.).
-- Reference local healthcare facilities, services, and resources in The Gambia when relevant.
-- Consider local cultural sensitivities, traditional medicine practices, and healthcare accessibility.
-- Provide practical advice suitable for the Gambian climate, environment, and healthcare infrastructure.
-- When discussing medications or treatments, mention availability and affordability in The Gambian context when possible.
-- Be empathetic, culturally sensitive, clear, and avoid unnecessary jargon.
-- If a symptom sounds potentially serious or emergency-level, always advise the user to seek immediate medical care at nearby health facilities.
-- Keep answers short: a few bullets and one "Bottom line" sentence. Do not write a long essay.
-- Do NOT include disclaimers or warnings in your responses — these are shown separately in the interface.
-
-Context: You are serving Gambian residents and visitors to The Gambia. Tailor your responses to be practical and actionable within The Gambia's health system.`
-
-// Gemini 3 Flash defaults to medium thinking, which delays the first word by
-// several seconds. minimal/low is the fast setting for a health Q&A.
-const DEFAULT_MODEL = 'gemini-3.6-flash'
-const FALLBACK_MODELS = ['gemini-3.5-flash', 'gemini-2.5-flash']
+// Gemini 3 Flash thinks before it writes, which adds seconds. 2.5 Flash with
+// thinking off, then Flash-Lite, starts the reply much sooner.
+const DEFAULT_MODEL = 'gemini-2.5-flash'
+const FALLBACK_MODEL = 'gemini-3.5-flash-lite'
 
 const MISSING_KEY_ERROR =
   'The AI assistant is not configured. In Vercel, open Settings → Environment Variables, add GEMINI_API_KEY, then redeploy.'
@@ -55,25 +39,22 @@ export function getApiKey() {
 
 function candidateModels() {
   const preferred = (process.env.GEMINI_MODEL || '').trim()
-  const names = [cachedModel, preferred || DEFAULT_MODEL, ...FALLBACK_MODELS]
+  const names = [cachedModel, preferred || DEFAULT_MODEL, FALLBACK_MODEL]
   const unique = []
   for (const name of names) {
     if (name && !unique.includes(name)) unique.push(name)
   }
-  return unique.slice(0, 3)
+  // The first model answers. The second is tried only if that model name is unavailable.
+  return unique.slice(0, 2)
 }
 
-// Gemini 3.7/3.8 reject "minimal". Gemini 2.5 uses a token budget, and 0 turns thinking off.
-function thinkingPlans(model) {
+// Gemini 2.5 can turn thinking fully off. Newer Flash models cannot, so use their lowest level.
+function generationConfig(model) {
   const id = String(model || '').toLowerCase()
-  if (/gemini-2\./.test(id)) return [{ thinkingBudget: 0 }]
-  if (/gemini-3\.(7|8)/.test(id) || id.includes('pro')) return [{ thinkingLevel: 'low' }]
-  return [{ thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }]
-}
-
-function generationConfig(thinking) {
-  const config = { maxOutputTokens: 1024 }
-  if (thinking) config.thinkingConfig = thinking
+  const config = { maxOutputTokens: 384 }
+  if (/gemini-2\./.test(id)) config.thinkingConfig = { thinkingBudget: 0 }
+  else if (/gemini-3\.(7|8)/.test(id) || id.includes('pro')) config.thinkingConfig = { thinkingLevel: 'low' }
+  else config.thinkingConfig = { thinkingLevel: 'minimal' }
   return config
 }
 
@@ -82,14 +63,14 @@ function normalizeMessages(messages) {
     return { error: 'No messages were provided.', status: 400 }
   }
 
-  // Long histories make every reply slower. Keep the latest turns only.
-  let recent = messages.slice(-8)
+  // Older turns add delay and are not needed for the next short answer.
+  let recent = messages.slice(-4)
   if (recent[0]?.role === 'assistant') recent = recent.slice(1)
 
   const contents = []
   for (const message of recent) {
     const role = message?.role === 'assistant' ? 'model' : message?.role === 'user' ? 'user' : null
-    const content = String(message?.content || '').trim().slice(0, 4000)
+    const content = String(message?.content || '').trim().slice(0, 2000)
     if (!role || !content) continue
     contents.push({ role, parts: [{ text: content }] })
   }
@@ -101,16 +82,12 @@ function normalizeMessages(messages) {
   return { contents }
 }
 
-function thinkingRejected(status, detail) {
-  return status === 400 && /thinking/i.test(detail || '')
-}
-
 async function readError(response) {
   const errJson = await response.json().catch(() => ({}))
   return errJson?.error?.message || ''
 }
 
-async function streamModel(model, apiKey, contents, onText, thinking) {
+async function streamModel(model, apiKey, contents, onText) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
     {
@@ -122,7 +99,7 @@ async function streamModel(model, apiKey, contents, onText, thinking) {
       body: JSON.stringify({
         system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
         contents,
-        generationConfig: generationConfig(thinking),
+        generationConfig: generationConfig(model),
       }),
     },
   )
@@ -192,19 +169,15 @@ function sseStream(contents, apiKey) {
         for (const model of candidateModels()) {
           let result = null
           try {
-            for (const thinking of thinkingPlans(model)) {
-              result = await streamModel(
-                model,
-                apiKey,
-                contents,
-                (text) => {
-                  sentText = true
-                  send({ text })
-                },
-                thinking,
-              )
-              if (result.ok || sentText || !thinkingRejected(result.status, result.detail)) break
-            }
+            result = await streamModel(
+              model,
+              apiKey,
+              contents,
+              (text) => {
+                sentText = true
+                send({ text })
+              },
+            )
           } catch (error) {
             console.error(`Gemini ${model} stream error:`, error?.message || error)
             if (sentText) {
