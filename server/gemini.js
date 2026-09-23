@@ -24,28 +24,25 @@ const SYSTEM_PROMPT = `You are NafaCare AI, a strictly health-focused assistant 
 - When discussing medications or treatments, mention availability and affordability in The Gambian context when possible.
 - Be empathetic, culturally sensitive, clear, and avoid unnecessary jargon.
 - If a symptom sounds potentially serious or emergency-level, always advise the user to seek immediate medical care at nearby health facilities.
-- Structure longer answers with short headings, bullet points, and a "Bottom line" section.
+- Keep answers short: a few bullets and one "Bottom line" sentence. Do not write a long essay.
 - Do NOT include disclaimers or warnings in your responses — these are shown separately in the interface.
 
 Context: You are serving Gambian residents and visitors to The Gambia. Tailor your responses to be practical and actionable within The Gambia's health system.`
 
-const MODEL_CANDIDATES = [
-  'gemini-3.6-flash',
-  'gemini-3.5-flash',
-  'gemini-3.5-flash-lite',
-  'gemini-flash-latest',
-  'gemini-3.1-pro-preview',
-]
-
-function isChatModel(name) {
-  const id = String(name || '').toLowerCase()
-  if (!id.includes('gemini')) return false
-  const blocked = ['tts', 'embedding', 'imagen', 'image', 'aqa', 'robotics', 'computer-use', 'native-audio', 'audio', 'live']
-  return !blocked.some((word) => id.includes(word))
-}
+// Gemini 3 Flash defaults to medium thinking, which delays the first word by
+// several seconds. minimal/low is the fast setting for a health Q&A.
+const DEFAULT_MODEL = 'gemini-3.6-flash'
+const FALLBACK_MODELS = ['gemini-3.5-flash', 'gemini-2.5-flash']
 
 const MISSING_KEY_ERROR =
   'The AI assistant is not configured. In Vercel, open Settings → Environment Variables, add GEMINI_API_KEY, then redeploy.'
+const BUSY_ERROR = 'The AI service is busy right now. Please wait a moment and try again.'
+const DOWN_ERROR = 'The AI assistant is currently unavailable. Please try again in a few moments.'
+const EMPTY_ERROR = 'The AI service returned an empty response. Please try again.'
+const BAD_KEY_ERROR =
+  'The AI assistant rejected the server API key. Check GEMINI_API_KEY in Vercel and redeploy.'
+
+let cachedModel = null
 
 export function getApiKey() {
   return (
@@ -56,18 +53,43 @@ export function getApiKey() {
   )
 }
 
+function candidateModels() {
+  const preferred = (process.env.GEMINI_MODEL || '').trim()
+  const names = [cachedModel, preferred || DEFAULT_MODEL, ...FALLBACK_MODELS]
+  const unique = []
+  for (const name of names) {
+    if (name && !unique.includes(name)) unique.push(name)
+  }
+  return unique.slice(0, 3)
+}
+
+// Gemini 3.7/3.8 reject "minimal". Gemini 2.5 uses a token budget, and 0 turns thinking off.
+function thinkingPlans(model) {
+  const id = String(model || '').toLowerCase()
+  if (/gemini-2\./.test(id)) return [{ thinkingBudget: 0 }]
+  if (/gemini-3\.(7|8)/.test(id) || id.includes('pro')) return [{ thinkingLevel: 'low' }]
+  return [{ thinkingLevel: 'minimal' }, { thinkingLevel: 'low' }]
+}
+
+function generationConfig(thinking) {
+  const config = { maxOutputTokens: 1024 }
+  if (thinking) config.thinkingConfig = thinking
+  return config
+}
+
 function normalizeMessages(messages) {
   if (!Array.isArray(messages) || messages.length === 0) {
     return { error: 'No messages were provided.', status: 400 }
   }
-  if (messages.length > 20) {
-    return { error: 'The conversation is too long. Clear the chat and try again.', status: 400 }
-  }
+
+  // Long histories make every reply slower. Keep the latest turns only.
+  let recent = messages.slice(-8)
+  if (recent[0]?.role === 'assistant') recent = recent.slice(1)
 
   const contents = []
-  for (const message of messages) {
+  for (const message of recent) {
     const role = message?.role === 'assistant' ? 'model' : message?.role === 'user' ? 'user' : null
-    const content = String(message?.content || '').trim().slice(0, 8000)
+    const content = String(message?.content || '').trim().slice(0, 4000)
     if (!role || !content) continue
     contents.push({ role, parts: [{ text: content }] })
   }
@@ -79,62 +101,152 @@ function normalizeMessages(messages) {
   return { contents }
 }
 
-async function requestModel(model, apiKey, payload) {
+function thinkingRejected(status, detail) {
+  return status === 400 && /thinking/i.test(detail || '')
+}
+
+async function readError(response) {
+  const errJson = await response.json().catch(() => ({}))
+  return errJson?.error?.message || ''
+}
+
+async function streamModel(model, apiKey, contents, onText, thinking) {
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+        contents,
+        generationConfig: generationConfig(thinking),
+      }),
     },
   )
 
-  if (response.ok) {
-    const data = await response.json()
-    const text = data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim() || ''
-    if (!text) {
-      return { ok: false, fatal: true, status: 502, error: 'The AI service returned an empty response. Please try again.' }
-    }
-    return { ok: true, text }
+  if (!response.ok) {
+    const detail = await readError(response)
+    console.error(`Gemini ${model} failed (${response.status}): ${detail}`)
+    return { ok: false, status: response.status, detail }
   }
 
-  const errJson = await response.json().catch(() => ({}))
-  const detail = errJson?.error?.message || ''
-  console.error(`Gemini ${model} failed (${response.status}): ${detail}`)
+  const reader = response.body?.getReader()
+  if (!reader) return { ok: false, status: 502, detail: 'no stream' }
 
-  if (response.status === 401 || response.status === 403) {
-    return {
-      ok: false,
-      fatal: true,
-      status: 502,
-      error: 'The AI assistant rejected the server API key. Check GEMINI_API_KEY in Vercel and redeploy.',
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let gotText = false
+
+  const consume = (block) => {
+    for (const line of block.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed.startsWith('data:')) continue
+      const json = trimmed.slice(5).trim()
+      if (!json || json === '[DONE]') continue
+      let chunk
+      try {
+        chunk = JSON.parse(json)
+      } catch {
+        continue
+      }
+      const parts = chunk?.candidates?.[0]?.content?.parts || []
+      for (const part of parts) {
+        if (!part?.text || part.thought) continue
+        gotText = true
+        onText(part.text)
+      }
     }
   }
 
-  // Try the next model. A 429 on one model should not hide a working model.
-  return { ok: false, fatal: false, status: response.status }
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() || ''
+    for (const block of blocks) consume(block)
+  }
+  if (buffer.trim()) consume(buffer)
+
+  if (!gotText) return { ok: false, status: 502, detail: 'empty' }
+  return { ok: true }
 }
 
-async function discoverModels(apiKey) {
-  try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models?pageSize=50&key=${apiKey}`,
-    )
-    if (!response.ok) return []
-    const data = await response.json()
-    return (data.models || [])
-      .filter((model) =>
-        (model.supportedGenerationMethods || []).includes('generateContent') &&
-        isChatModel(model.name),
-      )
-      .map((model) => String(model.name).replace(/^models\//, ''))
-  } catch (error) {
-    console.error('Gemini model discovery failed:', error?.message || error)
-    return []
-  }
+function sseStream(contents, apiKey) {
+  const encoder = new TextEncoder()
+  return new ReadableStream({
+    async start(controller) {
+      const send = (obj) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`))
+      }
+      let sentText = false
+
+      try {
+        // A comment frame makes proxies flush the headers before the model replies.
+        controller.enqueue(encoder.encode(': stream\n\n'))
+
+        let sawRateLimit = false
+        for (const model of candidateModels()) {
+          let result = null
+          try {
+            for (const thinking of thinkingPlans(model)) {
+              result = await streamModel(
+                model,
+                apiKey,
+                contents,
+                (text) => {
+                  sentText = true
+                  send({ text })
+                },
+                thinking,
+              )
+              if (result.ok || sentText || !thinkingRejected(result.status, result.detail)) break
+            }
+          } catch (error) {
+            console.error(`Gemini ${model} stream error:`, error?.message || error)
+            if (sentText) {
+              send({ error: DOWN_ERROR })
+              return
+            }
+            continue
+          }
+
+          if (result?.ok) {
+            cachedModel = model
+            send({ done: true })
+            return
+          }
+          if (sentText) {
+            send({ error: EMPTY_ERROR })
+            return
+          }
+          if (result?.status === 401 || result?.status === 403) {
+            send({ error: BAD_KEY_ERROR })
+            return
+          }
+          if (result?.status === 429) {
+            sawRateLimit = true
+            break
+          }
+        }
+
+        send({ error: sawRateLimit ? BUSY_ERROR : DOWN_ERROR })
+      } catch (error) {
+        console.error('Gemini stream error:', error?.message || error)
+        if (!sentText) send({ error: DOWN_ERROR })
+      } finally {
+        controller.close()
+      }
+    },
+  })
 }
 
-export async function generateChat(messages) {
+// JSON for errors we know before calling Gemini. A stream once the model is in play,
+// so the browser can show words as they arrive instead of waiting for the full answer.
+export function openChatStream(messages) {
   const normalized = normalizeMessages(messages)
   if (normalized.error) {
     return { status: normalized.status, body: { error: normalized.error } }
@@ -145,41 +257,43 @@ export async function generateChat(messages) {
     return { status: 503, body: { error: MISSING_KEY_ERROR } }
   }
 
-  const payload = {
-    system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-    contents: normalized.contents,
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-  }
+  return { status: 200, stream: sseStream(normalized.contents, apiKey) }
+}
 
-  const preferred = [process.env.GEMINI_MODEL, ...MODEL_CANDIDATES].filter(Boolean)
-  const tried = new Set()
-
-  for (const model of preferred) {
-    tried.add(model)
-    const result = await requestModel(model, apiKey, payload)
-    if (result.ok) return { status: 200, body: { text: result.text } }
-    if (result.fatal) return { status: result.status, body: { error: result.error } }
-  }
-
-  const discovered = await discoverModels(apiKey)
-  let sawRateLimit = false
-  for (const model of discovered) {
-    if (tried.has(model) || !isChatModel(model)) continue
-    const result = await requestModel(model, apiKey, payload)
-    if (result.ok) return { status: 200, body: { text: result.text } }
-    if (result.fatal) return { status: result.status, body: { error: result.error } }
-    if (result.status === 429) sawRateLimit = true
-  }
-
-  if (sawRateLimit) {
-    return {
-      status: 429,
-      body: { error: 'The AI service is busy right now. Please wait a moment and try again.' },
+export async function writeChatToNodeResponse(res, messages) {
+  try {
+    const opened = openChatStream(messages)
+    if (opened.body) {
+      res.statusCode = opened.status
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      res.end(JSON.stringify(opened.body))
+      return
     }
-  }
 
-  return {
-    status: 502,
-    body: { error: 'The AI assistant is currently unavailable. Please try again in a few moments.' },
+    res.statusCode = 200
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache, no-transform')
+    res.setHeader('Connection', 'keep-alive')
+    res.setHeader('X-Accel-Buffering', 'no')
+    if (typeof res.flushHeaders === 'function') res.flushHeaders()
+
+    const reader = opened.stream.getReader()
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!res.write(value)) {
+        await new Promise((resolve) => res.once('drain', resolve))
+      }
+    }
+    res.end()
+  } catch (error) {
+    console.error('Chat route error:', error?.message || error)
+    if (res.headersSent) {
+      try { res.end() } catch { /* client already gone */ }
+      return
+    }
+    res.statusCode = 500
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.end(JSON.stringify({ error: DOWN_ERROR }))
   }
 }

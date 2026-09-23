@@ -41,26 +41,63 @@ async function fetchAIResponse(messages, onChunk) {
     body: JSON.stringify({ messages }),
   })
 
-  if (!response.ok) {
-    let payload = {}
-    try {
-      payload = await response.json()
-    } catch {
-      payload = {}
+  const type = response.headers.get('content-type') || ''
+  if (type.includes('application/json') || !response.ok) {
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok) {
+      throw new Error(payload.error || 'The AI assistant is temporarily unavailable. Please try again.')
     }
-
-    const message = payload.error || 'The AI assistant is temporarily unavailable. Please try again.'
-    throw new Error(message)
+    const text = typeof payload.text === 'string' ? payload.text.trim() : ''
+    if (!text) throw new Error('The AI assistant returned an empty response. Please try again.')
+    onChunk(text)
+    return
   }
 
-  const data = await response.json().catch(() => ({}))
-  const text = typeof data.text === 'string' ? data.text.trim() : ''
+  if (!response.body) {
+    throw new Error('The AI assistant is temporarily unavailable. Please try again.')
+  }
 
-  if (!text) {
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let received = false
+
+  const handleBlock = (block) => {
+    const dataLine = block.split('\n').map((line) => line.trim()).find((line) => line.startsWith('data:'))
+    if (!dataLine) return
+    let event
+    try {
+      event = JSON.parse(dataLine.slice(5).trim())
+    } catch {
+      return
+    }
+    if (event.error) {
+      if (!received) throw new Error(event.error)
+      return
+    }
+    if (typeof event.text === 'string' && event.text) {
+      received = true
+      onChunk(event.text)
+    }
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+      const blocks = buffer.split('\n\n')
+      buffer = blocks.pop() ?? ''
+      for (const block of blocks) handleBlock(block)
+    }
+    if (buffer.trim()) handleBlock(buffer)
+  } catch (error) {
+    if (!received) throw error
+  }
+
+  if (!received) {
     throw new Error('The AI assistant returned an empty response. Please try again.')
   }
-
-  onChunk(text)
 }
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
