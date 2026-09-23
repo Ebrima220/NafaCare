@@ -6,6 +6,12 @@ html {
   scroll-behavior: smooth;
 }
 
+/* Tailwind's image reset stretches Leaflet tiles and pins, so markers miss the building. */
+.leaflet-container img {
+  max-width: none !important;
+  max-height: none !important;
+}
+
 /* ── Chat panel slide-in transitions ──────────────────────────────────────── */
 
 /* The Tailwind translate-x-full / translate-y-full utilities handle the closed

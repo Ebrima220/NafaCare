@@ -1,328 +1,443 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import { useDarkMode } from '../hooks/useDarkMode'
+import catalog from '../data/health-facilities.json'
 
-// ── Fix Leaflet's default marker icon paths broken by bundlers ────────────────
-import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png'
-import markerIcon from 'leaflet/dist/images/marker-icon.png'
-import markerShadow from 'leaflet/dist/images/marker-shadow.png'
+// OpenStreetMap health facilities in The Gambia (snapshot 8 September 2026).
+// A live Overpass search was missing buildings, timing out, and pinning the
+// centre of the wrong outline. This list is deduped to one pin per place.
 
-delete L.Icon.Default.prototype._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconUrl: markerIcon,
-  iconRetinaUrl: markerIcon2x,
-  shadowUrl: markerShadow,
-})
+const GAMBIA_BOUNDS = { south: 13.065, west: -16.825, north: 13.825, east: -13.797 }
+const GAMBIA_CENTER = [13.4432, -15.3101]
+const BANJUL = { lat: 13.4549, lon: -16.579 }
 
-// ── Custom coloured icons ─────────────────────────────────────────────────────
+const TYPE_LABEL = {
+  hospital: 'Hospital',
+  clinic: 'Clinic',
+  pharmacy: 'Pharmacy',
+  health: 'Health centre',
+  doctors: "Doctor's office",
+  dentist: 'Dentist',
+}
+
+const TYPE_COLOR = {
+  hospital: '#dc2626',
+  clinic: '#059669',
+  pharmacy: '#2563eb',
+  health: '#7c3aed',
+  doctors: '#059669',
+  dentist: '#0f766e',
+}
+
 function makeIcon(color) {
   const svg = encodeURIComponent(`
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 36" width="24" height="36">
-      <path d="M12 0C5.373 0 0 5.373 0 12c0 9 12 24 12 24s12-15 12-24C24 5.373 18.627 0 12 0z"
-        fill="${color}" stroke="white" stroke-width="1.5"/>
+      <path d="M12 0C5.373 0 0 5.373 0 12c0 9 12 24 12 24s12-15 12-24C24 5.373 18.627 0 12 0z" fill="${color}" stroke="white" stroke-width="1.5"/>
       <circle cx="12" cy="12" r="5" fill="white"/>
     </svg>`)
   return L.divIcon({
-    html: `<img src="data:image/svg+xml,${svg}" width="24" height="36" />`,
     className: '',
+    html: `<div style="width:24px;height:36px;background:url('data:image/svg+xml,${svg}') center / contain no-repeat"></div>`,
     iconSize: [24, 36],
     iconAnchor: [12, 36],
-    popupAnchor: [0, -36],
+    popupAnchor: [0, -32],
   })
 }
 
-const ICONS = {
-  hospital:   makeIcon('#dc2626'),  // red
-  clinic:     makeIcon('#059669'),  // green
-  pharmacy:   makeIcon('#2563eb'),  // blue
-  health:     makeIcon('#7c3aed'),  // purple
-  user:       makeIcon('#f59e0b'),  // amber — user location
-}
+const ICONS = Object.fromEntries(Object.entries(TYPE_COLOR).map(([type, color]) => [type, makeIcon(color)]))
 
-// ── Facility type labels ──────────────────────────────────────────────────────
-const TYPE_LABEL = {
-  hospital:    { label: 'Hospital',          icon: ICONS.hospital },
-  clinic:      { label: 'Clinic',            icon: ICONS.clinic   },
-  pharmacy:    { label: 'Pharmacy',          icon: ICONS.pharmacy },
-  health_post: { label: 'Health Post',       icon: ICONS.health   },
-  health:      { label: 'Health Centre',     icon: ICONS.health   },
-  doctors:     { label: "Doctor's Office",   icon: ICONS.clinic   },
-  dentist:     { label: 'Dentist',           icon: ICONS.clinic   },
-}
+const YOU_ICON = L.divIcon({
+  className: '',
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+  html: `<div style="width:18px;height:18px;border-radius:9999px;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 7px rgba(37,99,235,.28)"></div>`,
+})
 
-// ── Gambia bounding box ───────────────────────────────────────────────────────
-const GAMBIA_BOUNDS = {
-  south: 13.065,
-  west: -16.825,
-  north: 13.825,
-  east: -13.797,
-}
-const GAMBIA_CENTER = [13.4432, -15.3101]
-
-// ── Overpass query: all healthcare amenities inside The Gambia ────────────────
-async function fetchHealthFacilities(lat, lon, radiusKm = 20) {
-  const r = radiusKm * 1000
-  const query = `
-    [out:json][timeout:25];
-    (
-      node["amenity"~"hospital|clinic|pharmacy|health_post|doctors|dentist"](around:${r},${lat},${lon});
-      way["amenity"~"hospital|clinic|pharmacy|health_post|doctors|dentist"](around:${r},${lat},${lon});
-      node["healthcare"~"hospital|clinic|pharmacy|health_post|centre|doctor|dentist"](around:${r},${lat},${lon});
-      way["healthcare"~"hospital|clinic|pharmacy|health_post|centre|doctor|dentist"](around:${r},${lat},${lon});
-    );
-    out center;
-  `.trim()
-
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    body: 'data=' + encodeURIComponent(query),
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-  })
-  if (!res.ok) throw new Error('Overpass API error: ' + res.status)
-  const data = await res.json()
-  return data.elements
-}
-
-// ── Utility: clamp coords to Gambia bounds ────────────────────────────────────
-function clampToGambia(lat, lon) {
-  return [
-    Math.max(GAMBIA_BOUNDS.south, Math.min(GAMBIA_BOUNDS.north, lat)),
-    Math.max(GAMBIA_BOUNDS.west,  Math.min(GAMBIA_BOUNDS.east,  lon)),
-  ]
-}
-
-// ── Distance in km (Haversine) ────────────────────────────────────────────────
 function distanceKm(lat1, lon1, lat2, lon2) {
   const R = 6371
   const dLat = ((lat2 - lat1) * Math.PI) / 180
   const dLon = ((lon2 - lon1) * Math.PI) / 180
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+function insideGambia(lat, lon) {
+  return lat >= GAMBIA_BOUNDS.south && lat <= GAMBIA_BOUNDS.north
+    && lon >= GAMBIA_BOUNDS.west && lon <= GAMBIA_BOUNDS.east
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[char]))
+}
+
+function popupHtml(facility, isDark, showDistance) {
+  const title = isDark ? '#10b981' : '#059669'
+  const muted = isDark ? '#94a3b8' : '#64748b'
+  const text = isDark ? '#e2e8f0' : '#475569'
+  const place = [facility.place, facility.region].filter(Boolean).join(', ')
+  return `
+    <div style="min-width:180px;color:${text}">
+      <b style="color:${title}">${escapeHtml(facility.name)}</b><br/>
+      <span style="font-size:12px;color:${muted}">${escapeHtml(facility.label)}${place ? ` · ${escapeHtml(place)}` : ''}</span>
+      ${showDistance ? `<br/><span style="font-size:12px;color:${text}">${facility.dist.toFixed(1)} km away</span>` : ''}
+    </div>`
+}
+
+function directionsUrl(from, to, mode) {
+  const params = new URLSearchParams({
+    api: '1',
+    destination: `${to.lat},${to.lon}`,
+    travelmode: mode === 'foot' ? 'walking' : 'driving',
+  })
+  // Only pass an origin we actually measured. A Banjul fallback would start the route in the wrong place.
+  if (from) params.set('origin', `${from.lat},${from.lon}`)
+  return `https://www.google.com/maps/dir/?${params.toString()}`
+}
+
+function facilitiesAround(lat, lon, radiusKm) {
+  const ranked = catalog
+    .map((facility) => ({
+      ...facility,
+      label: TYPE_LABEL[facility.type] || TYPE_LABEL.health,
+      icon: ICONS[facility.type] || ICONS.health,
+      dist: distanceKm(lat, lon, facility.lat, facility.lon),
+    }))
+    .sort((a, b) => a.dist - b.dist)
+
+  if (radiusKm == null) return { list: ranked, widened: false }
+  const within = ranked.filter((facility) => facility.dist <= radiusKm)
+  if (within.length > 0) return { list: within, widened: false }
+  return { list: ranked.slice(0, 12), widened: true }
+}
+
 export default function HealthCentersMap({ open, onClose }) {
-  const mapRef      = useRef(null)   // Leaflet map instance
-  const containerRef = useRef(null)  // DOM div
+  const mapRef = useRef(null)
+  const containerRef = useRef(null)
   const userMarkerRef = useRef(null)
+  const accuracyRef = useRef(null)
+  const facilityLayerRef = useRef(null)
+  const routeLayerRef = useRef(null)
+  const markerByIdRef = useRef(new Map())
+  const watchRef = useRef(null)
+  const routeTokenRef = useRef(0)
+  const radiusRef = useRef(null)
+  const radiusPickedRef = useRef(false)
+  const userPosRef = useRef(null)
+  const aliveRef = useRef(false)
+  const darkRef = useRef(false)
+  const measuredRef = useRef('country')
 
-  const [status, setStatus]       = useState('idle')   // idle | locating | loading | ready | error
-  const [errorMsg, setErrorMsg]   = useState('')
-  const [facilities, setFacilities] = useState([])
-  const [selected, setSelected]   = useState(null)
-  const [userPos, setUserPos]     = useState(null)
-  const [searchRadius, setSearchRadius] = useState(20)
-
-  // Get dark mode state
   const [isDark] = useDarkMode()
+  const [status, setStatus] = useState('idle')
+  const [errorMsg, setErrorMsg] = useState('')
+  const [facilities, setFacilities] = useState([])
+  const [selectedId, setSelectedId] = useState(null)
+  const [userPos, setUserPos] = useState(null)
+  const [locating, setLocating] = useState(false)
+  const [locationNote, setLocationNote] = useState('')
+  const [measuredFrom, setMeasuredFrom] = useState('country')
+  const [searchRadius, setSearchRadius] = useState(null)
+  const [widened, setWidened] = useState(false)
+  const [travelMode, setTravelMode] = useState('driving')
+  const [route, setRoute] = useState(null)
 
-  // ── Generate popup content with theme-appropriate colors ─────────────────
-  function createPopupContent(f) {
-    const titleColor = isDark ? '#10b981' : '#059669'  // emerald-500 : emerald-600
-    const labelColor = isDark ? '#94a3b8' : '#64748b'  // slate-400 : slate-500
-    const textColor = isDark ? '#e2e8f0' : '#475569'   // slate-200 : slate-600
-    
-    return `
-      <div style="min-width:180px; color: ${textColor};">
-        <b style="color:${titleColor}">${f.name}</b><br/>
-        <span style="font-size:12px;color:${labelColor}">${f.label}</span><br/>
-        <span style="font-size:12px;color:${textColor}">📏 ${f.dist.toFixed(1)} km away</span>
-        ${f.phone    ? `<br/><span style="font-size:12px;color:${textColor}">📞 ${f.phone}</span>` : ''}
-        ${f.opening  ? `<br/><span style="font-size:12px;color:${textColor}">🕐 ${f.opening}</span>` : ''}
-      </div>
-    `
+  darkRef.current = isDark
+  measuredRef.current = measuredFrom
+  radiusRef.current = searchRadius
+  const selected = facilities.find((facility) => facility.id === selectedId) || null
+
+  function drawUser(map, pos) {
+    if (accuracyRef.current) accuracyRef.current.remove()
+    if (userMarkerRef.current) userMarkerRef.current.remove()
+    accuracyRef.current = L.circle([pos.lat, pos.lon], {
+      radius: Math.max(pos.accuracy || 40, 20),
+      color: '#2563eb',
+      weight: 1,
+      fillColor: '#2563eb',
+      fillOpacity: 0.12,
+    }).addTo(map)
+    userMarkerRef.current = L.marker([pos.lat, pos.lon], { icon: YOU_ICON, zIndexOffset: 1000 })
+      .addTo(map)
+      .bindPopup('<b>You are here</b>')
   }
 
-  // ── Update popup colors when theme changes ──────────────────────────────────
-  useEffect(() => {
-    if (!mapRef.current || !facilities.length) return
-    
-    // Update all existing popups with new theme colors
-    mapRef.current.eachLayer((layer) => {
-      if (layer instanceof L.Marker && layer !== userMarkerRef.current) {
-        const facility = facilities.find(f => 
-          Math.abs(layer.getLatLng().lat - f.lat) < 0.0001 && 
-          Math.abs(layer.getLatLng().lng - f.lon) < 0.0001
-        )
-        if (facility) {
-          layer.setPopupContent(createPopupContent(facility))
-        }
-      }
+  function drawFacilities(map, list) {
+    const layer = facilityLayerRef.current
+    if (!layer) return
+    layer.clearLayers()
+    markerByIdRef.current = new Map()
+    list.forEach((facility) => {
+      const marker = L.marker([facility.lat, facility.lon], { icon: facility.icon })
+        .addTo(layer)
+        .bindPopup(popupHtml(facility, darkRef.current, measuredRef.current !== 'country'))
+      marker.facility = facility
+      marker.on('click', () => focusFacility(facility))
+      markerByIdRef.current.set(facility.id, marker)
     })
-  }, [isDark, facilities, createPopupContent])
+  }
 
-  // ── Initialise map once ───────────────────────────────────────────────────
-  useEffect(() => {
-    if (!open || mapRef.current) return
-
-    const map = L.map(containerRef.current, {
-      center: GAMBIA_CENTER,
-      zoom: 8,
-      zoomControl: true,
-    })
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      maxZoom: 19,
-    }).addTo(map)
-
-    // Restrict panning outside Gambia with a soft boundary
-    const gambiaLatLngBounds = L.latLngBounds(
-      [GAMBIA_BOUNDS.south - 0.5, GAMBIA_BOUNDS.west - 0.5],
-      [GAMBIA_BOUNDS.north + 0.5, GAMBIA_BOUNDS.east + 0.5],
-    )
-    map.setMaxBounds(gambiaLatLngBounds)
-
-    mapRef.current = map
-
-    // Auto-locate on open
-    locateUser(map)
-
-    return () => {
-      map.remove()
-      mapRef.current = null
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
-
-  // ── Update user marker popup when theme changes ─────────────────────────────
-  useEffect(() => {
-    if (userMarkerRef.current) {
-      const popup = userMarkerRef.current.getPopup()
-      if (popup && popup.getContent()) {
-        const currentContent = popup.getContent()
-        if (currentContent.includes('Your Location')) {
-          userMarkerRef.current.setPopupContent(`<b style="color: ${isDark ? '#10b981' : '#059669'}">📍 Your Location</b>`)
-        } else if (currentContent.includes('Banjul')) {
-          userMarkerRef.current.setPopupContent(`<b style="color: ${isDark ? '#10b981' : '#059669'}">📍 Banjul (default)</b><br/><small style="color: ${isDark ? '#94a3b8' : '#64748b'}">Enable location for better results</small>`)
-        }
-      }
-    }
-  }, [isDark])
-
-  // ── Locate user + fetch facilities ───────────────────────────────────────
-  function locateUser(map) {
-    const m = map || mapRef.current
-    if (!m) return
-    setStatus('locating')
+  function showFacilities(map, lat, lon, radius) {
+    const { list, widened: didWiden } = facilitiesAround(lat, lon, radius)
+    setFacilities(list)
+    setWidened(didWiden)
+    drawFacilities(map, list)
+    setStatus('ready')
     setErrorMsg('')
+    return list
+  }
+
+  function clearRoute() {
+    routeTokenRef.current += 1
+    if (routeLayerRef.current) {
+      routeLayerRef.current.remove()
+      routeLayerRef.current = null
+    }
+    setRoute(null)
+  }
+
+  async function routeTo(facility, mode = travelMode) {
+    const map = mapRef.current
+    const from = userPosRef.current
+    setSelectedId(facility.id)
+    markerByIdRef.current.get(facility.id)?.openPopup()
+    if (!map || !from) {
+      clearRoute()
+      setSelectedId(facility.id)
+      map?.flyTo([facility.lat, facility.lon], 16, { duration: 0.8 })
+      return
+    }
+
+    const token = ++routeTokenRef.current
+    if (routeLayerRef.current) routeLayerRef.current.remove()
+    const line = L.polyline([[from.lat, from.lon], [facility.lat, facility.lon]], {
+      color: '#059669',
+      weight: 5,
+      opacity: 0.9,
+      dashArray: '8 8',
+    }).addTo(map)
+    routeLayerRef.current = line
+    setRoute({ facilityId: facility.id, loading: true, mode })
+
+    try {
+      const profile = mode === 'foot' ? 'foot' : 'driving'
+      const response = await fetch(
+        `https://router.project-osrm.org/route/v1/${profile}/${from.lon},${from.lat};${facility.lon},${facility.lat}?overview=full&geometries=geojson`,
+      )
+      if (token !== routeTokenRef.current) return
+      if (!response.ok) throw new Error('route')
+      const data = await response.json()
+      const path = data.routes?.[0]
+      if (!path?.geometry?.coordinates?.length) throw new Error('route')
+      const latLngs = path.geometry.coordinates.map(([lon, lat]) => [lat, lon])
+      line.setLatLngs(latLngs)
+      line.setStyle({ dashArray: null })
+      setRoute({
+        facilityId: facility.id,
+        loading: false,
+        mode,
+        km: path.distance / 1000,
+        minutes: Math.max(1, Math.round(path.duration / 60)),
+        straight: false,
+      })
+      map.fitBounds(line.getBounds(), { padding: [48, 48], maxZoom: 16 })
+    } catch {
+      if (token !== routeTokenRef.current) return
+      setRoute({
+        facilityId: facility.id,
+        loading: false,
+        mode,
+        km: facility.dist,
+        minutes: null,
+        straight: true,
+      })
+      map.fitBounds(line.getBounds(), { padding: [48, 48], maxZoom: 16 })
+    }
+  }
+
+  function focusFacility(facility) {
+    routeTo(facility)
+  }
+
+  function acceptPosition(map, pos, source) {
+    if (!aliveRef.current || mapRef.current !== map) return
+    const next = {
+      lat: pos.coords.latitude,
+      lon: pos.coords.longitude,
+      accuracy: Math.round(pos.coords.accuracy || 0),
+      source,
+    }
+    if (!insideGambia(next.lat, next.lon)) {
+      setLocationNote('Your position is outside The Gambia, so the map is still centred on the country.')
+      return
+    }
+
+    const previous = userPosRef.current
+    const moved = !previous || distanceKm(previous.lat, previous.lon, next.lat, next.lon) > 0.4
+    const sharper = !previous || next.accuracy + 20 < previous.accuracy
+    userPosRef.current = next
+    setUserPos(next)
+    measuredRef.current = 'user'
+    setMeasuredFrom('user')
+    setLocationNote('')
+    if (!previous || moved || sharper) drawUser(map, next)
+    if (!moved && previous) return
+
+    if (!radiusPickedRef.current) {
+      radiusRef.current = 20
+      setSearchRadius(20)
+    }
+    const list = showFacilities(map, next.lat, next.lon, radiusRef.current)
+    if (list.length) {
+      const bounds = L.latLngBounds(list.map((facility) => [facility.lat, facility.lon]))
+      bounds.extend([next.lat, next.lon])
+      map.fitBounds(bounds, { padding: [36, 36], maxZoom: 14 })
+    } else {
+      map.setView([next.lat, next.lon], 14)
+    }
+  }
+
+  function useFallback(map, note) {
+    if (!aliveRef.current || mapRef.current !== map) return
+    setLocating(false)
+    setLocationNote(note)
+    measuredRef.current = 'banjul'
+    setMeasuredFrom('banjul')
+    userPosRef.current = null
+    setUserPos(null)
+    if (userMarkerRef.current) userMarkerRef.current.remove()
+    if (accuracyRef.current) accuracyRef.current.remove()
+    const list = showFacilities(map, BANJUL.lat, BANJUL.lon, radiusRef.current)
+    if (radiusRef.current == null && list.length) {
+      map.fitBounds(L.latLngBounds(list.map((facility) => [facility.lat, facility.lon])), { padding: [36, 36] })
+    } else {
+      map.setView([BANJUL.lat, BANJUL.lon], 12)
+    }
+  }
+
+  function locateUser(map) {
+    const target = map || mapRef.current
+    if (!target) return
+    setLocating(true)
+
+    if (!navigator.geolocation) {
+      useFallback(target, 'This browser cannot read where you are standing. Allow location, then tap Relocate.')
+      return
+    }
+
+    const onFix = (pos, source) => {
+      setLocating(false)
+      acceptPosition(target, pos, source)
+    }
 
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        let { latitude: lat, longitude: lon } = pos.coords
-        ;[lat, lon] = clampToGambia(lat, lon)
-
-        setUserPos({ lat, lon })
-        m.setView([lat, lon], 13)
-
-        // Drop user pin
-        if (userMarkerRef.current) userMarkerRef.current.remove()
-        userMarkerRef.current = L.marker([lat, lon], { icon: ICONS.user })
-          .addTo(m)
-          .bindPopup('<b>📍 Your Location</b>')
-          .openPopup()
-
-        loadFacilities(m, lat, lon, searchRadius)
+        onFix(pos, (pos.coords.accuracy || 9999) <= 100 ? 'gps' : 'network')
+        if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current)
+        watchRef.current = navigator.geolocation.watchPosition(
+          (better) => {
+            const current = userPosRef.current
+            if (!current || better.coords.accuracy <= current.accuracy + 5) {
+              acceptPosition(target, better, 'gps')
+            }
+          },
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
+        )
       },
       () => {
-        // Geolocation denied — fallback to Banjul city centre
-        const lat = 13.4549
-        const lon = -16.5790
-        setUserPos({ lat, lon })
-        m.setView([lat, lon], 12)
-
-        if (userMarkerRef.current) userMarkerRef.current.remove()
-        userMarkerRef.current = L.marker([lat, lon], { icon: ICONS.user })
-          .addTo(m)
-          .bindPopup('<b>📍 Banjul (default)</b><br><small>Enable location for better results</small>')
-          .openPopup()
-
-        loadFacilities(m, lat, lon, searchRadius)
+        navigator.geolocation.getCurrentPosition(
+          (pos) => onFix(pos, 'network'),
+          () => useFallback(target, 'Location is blocked. Allow it, then tap Relocate, so directions start where you are standing.'),
+          { enableHighAccuracy: false, maximumAge: 60000, timeout: 10000 },
+        )
       },
-      { timeout: 8000, enableHighAccuracy: true },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 },
     )
   }
 
-  async function loadFacilities(map, lat, lon, radius) {
-    setStatus('loading')
-    setFacilities([])
+  function handleRadiusChange(nextRadius) {
+    radiusPickedRef.current = true
+    setSearchRadius(nextRadius)
+    radiusRef.current = nextRadius
+    const map = mapRef.current
+    const origin = userPosRef.current || BANJUL
+    if (!map) return
+    clearRoute()
+    setSelectedId(null)
+    const list = showFacilities(map, origin.lat, origin.lon, nextRadius)
+    if (!list.length) return
+    const bounds = L.latLngBounds(list.map((facility) => [facility.lat, facility.lon]))
+    if (userPosRef.current) bounds.extend([userPosRef.current.lat, userPosRef.current.lon])
+    map.fitBounds(bounds, { padding: [36, 36], maxZoom: nextRadius == null ? 9 : 14 })
+  }
 
-    // Clear old markers (except user)
-    map.eachLayer((layer) => {
-      if (layer instanceof L.Marker && layer !== userMarkerRef.current) {
-        map.removeLayer(layer)
-      }
+  useEffect(() => {
+    if (!open || mapRef.current || !containerRef.current) return
+
+    aliveRef.current = true
+    const map = L.map(containerRef.current, { center: GAMBIA_CENTER, zoom: 8, zoomControl: true })
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map)
+    map.setMaxBounds(L.latLngBounds(
+      [GAMBIA_BOUNDS.south - 0.4, GAMBIA_BOUNDS.west - 0.4],
+      [GAMBIA_BOUNDS.north + 0.4, GAMBIA_BOUNDS.east + 0.4],
+    ))
+    facilityLayerRef.current = L.layerGroup().addTo(map)
+    mapRef.current = map
+
+    showFacilities(map, GAMBIA_CENTER[0], GAMBIA_CENTER[1], null)
+    map.fitBounds(L.latLngBounds(
+      [GAMBIA_BOUNDS.south, GAMBIA_BOUNDS.west],
+      [GAMBIA_BOUNDS.north, GAMBIA_BOUNDS.east],
+    ))
+    locateUser(map)
+
+    const resize = () => map.invalidateSize()
+    window.addEventListener('resize', resize)
+    const timer = setTimeout(resize, 250)
+
+    return () => {
+      aliveRef.current = false
+      clearTimeout(timer)
+      window.removeEventListener('resize', resize)
+      if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current)
+      watchRef.current = null
+      routeTokenRef.current += 1
+      map.remove()
+      mapRef.current = null
+      facilityLayerRef.current = null
+      userMarkerRef.current = null
+      accuracyRef.current = null
+      routeLayerRef.current = null
+    }
+  // Mount the map once per open. Helpers close over refs, not stale facility state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  useEffect(() => {
+    facilityLayerRef.current?.eachLayer((layer) => {
+      if (layer.facility) layer.setPopupContent(popupHtml(layer.facility, isDark, measuredFrom !== 'country'))
     })
+  }, [isDark, facilities])
 
-    try {
-      const elements = await fetchHealthFacilities(lat, lon, radius)
-
-      const parsed = elements
-        .filter((el) => {
-          const elLat = el.lat ?? el.center?.lat
-          const elLon = el.lon ?? el.center?.lon
-          return elLat && elLon
-        })
-        .map((el) => {
-          const elLat = el.lat ?? el.center.lat
-          const elLon = el.lon ?? el.center.lon
-          const tags  = el.tags || {}
-          const type  =
-            tags.amenity || tags.healthcare || 'health'
-          const info  = TYPE_LABEL[type] || TYPE_LABEL.health
-          return {
-            id:       el.id,
-            lat:      elLat,
-            lon:      elLon,
-            name:     tags.name || tags['name:en'] || 'Unnamed Facility',
-            type,
-            label:    info.label,
-            icon:     info.icon,
-            phone:    tags.phone || tags['contact:phone'] || null,
-            opening:  tags.opening_hours || null,
-            website:  tags.website || tags['contact:website'] || null,
-            dist:     distanceKm(lat, lon, elLat, elLon),
-          }
-        })
-        .sort((a, b) => a.dist - b.dist)
-
-      setFacilities(parsed)
-
-      parsed.forEach((f) => {
-        const marker = L.marker([f.lat, f.lon], { icon: f.icon })
-          .addTo(map)
-          .bindPopup(createPopupContent(f))
-        marker.on('click', () => setSelected(f))
-      })
-
-      setStatus('ready')
-    } catch (e) {
-      setErrorMsg('Could not load health facilities. Please try again.')
-      setStatus('error')
-    }
-  }
-
-  function handleRadiusChange(newRadius) {
-    setSearchRadius(newRadius)
-    if (userPos && mapRef.current) {
-      loadFacilities(mapRef.current, userPos.lat, userPos.lon, newRadius)
-    }
-  }
-
-  function flyToFacility(f) {
-    setSelected(f)
-    mapRef.current?.flyTo([f.lat, f.lon], 16, { duration: 1 })
-  }
+  useEffect(() => {
+    const timer = setTimeout(() => mapRef.current?.invalidateSize(), 50)
+    return () => clearTimeout(timer)
+  }, [selectedId, open])
 
   if (!open) return null
 
+  const showDistance = measuredFrom === 'user' || measuredFrom === 'banjul'
+  const distanceLabel = measuredFrom === 'user' ? 'from you' : 'from Banjul'
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-white dark:bg-slate-900">
-      {/* ── Header ── */}
       <div className="flex items-center justify-between border-b border-gray-100 bg-gradient-to-r from-green-600 to-emerald-500 px-4 py-3">
         <div className="flex items-center gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-5 w-5 text-white">
@@ -331,7 +446,9 @@ export default function HealthCentersMap({ open, onClose }) {
           </svg>
           <div>
             <p className="text-sm font-bold text-white leading-tight">Health Centers Near You</p>
-            <p className="text-[10px] text-green-100">The Gambia — Live Map</p>
+            <p className="text-[10px] text-green-100">
+              {locating ? 'Finding where you are standing…' : userPos ? `You are here · accurate to about ${userPos.accuracy || 30} m` : 'The Gambia'}
+            </p>
           </div>
         </div>
         <button onClick={onClose} className="rounded-full p-1.5 text-green-100 hover:bg-white/20 transition" aria-label="Close map">
@@ -341,167 +458,175 @@ export default function HealthCentersMap({ open, onClose }) {
         </button>
       </div>
 
-      {/* ── Controls bar ── */}
       <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-900">
-        {/* Radius selector */}
-        <div className="flex items-center gap-2 text-sm text-slate-600">
+        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
           <span className="font-medium">Radius:</span>
-          {[5, 10, 20, 50].map((r) => (
+          {[5, 10, 20, 50, null].map((radius) => (
             <button
-              key={r}
-              onClick={() => handleRadiusChange(r)}
+              key={radius ?? 'all'}
+              onClick={() => handleRadiusChange(radius)}
               className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
-                searchRadius === r
+                searchRadius === radius
                   ? 'bg-green-600 text-white'
                   : 'bg-slate-100 text-slate-600 hover:bg-green-100 hover:text-green-700 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-green-900/40 dark:hover:text-green-400'
               }`}
             >
-              {r} km
+              {radius == null ? 'All' : `${radius} km`}
             </button>
           ))}
         </div>
-
-        {/* Re-locate button */}
         <button
           onClick={() => locateUser()}
-          className="ml-auto flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 transition"
+          className="ml-auto flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-700 hover:bg-green-100 transition dark:bg-green-900/30 dark:text-green-300"
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-3.5 w-3.5">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
           </svg>
-          Relocate Me
+          {locating ? 'Locating…' : 'Relocate me'}
         </button>
       </div>
 
-      {/* ── Main content: map + sidebar ── */}
-      <div className="flex flex-1 overflow-hidden">
+      {locationNote && (
+        <div className="bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+          {locationNote}
+        </div>
+      )}
 
-        {/* ── Sidebar (facility list) ── */}
-        <div className="hidden md:flex w-72 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className="hidden md:flex w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
           <div className="border-b border-gray-100 px-4 py-3 dark:border-slate-700">
             <p className="text-sm font-semibold text-slate-800 dark:text-white">
-              {status === 'ready'
-                ? `${facilities.length} facilities found`
-                : status === 'loading' || status === 'locating'
-                ? 'Searching…'
-                : 'Health Facilities'}
+              {status === 'ready' ? `${facilities.length} places` : 'Health facilities'}
             </p>
-            {/* Legend */}
+            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+              {widened
+                ? `Nothing inside ${searchRadius} km. Showing the nearest places.`
+                : showDistance
+                  ? `Distance is ${distanceLabel}. Tap a place for the road from where you are standing.`
+                  : 'Tap a place, or allow location so the route starts where you are standing.'}
+            </p>
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
               {[
-                { color: 'bg-red-500',    label: 'Hospital'  },
-                { color: 'bg-emerald-600', label: 'Clinic'   },
-                { color: 'bg-blue-600',   label: 'Pharmacy'  },
-                { color: 'bg-violet-600', label: 'Health Ctr'},
-              ].map((l) => (
-                <span key={l.label} className="flex items-center gap-1 text-[11px] text-slate-500">
-                  <span className={`h-2 w-2 rounded-full ${l.color}`} />
-                  {l.label}
+                { color: 'bg-red-500', label: 'Hospital' },
+                { color: 'bg-emerald-600', label: 'Clinic' },
+                { color: 'bg-blue-600', label: 'Pharmacy' },
+                { color: 'bg-blue-600', label: 'You', dot: true },
+              ].map((item) => (
+                <span key={item.label} className="flex items-center gap-1 text-[11px] text-slate-500">
+                  <span className={`h-2 w-2 rounded-full ${item.color} ${item.dot ? 'ring-2 ring-blue-200' : ''}`} />
+                  {item.label}
                 </span>
               ))}
             </div>
           </div>
+          <FacilityList
+            facilities={facilities}
+            selectedId={selectedId}
+            status={status}
+            errorMsg={errorMsg}
+            showDistance={showDistance}
+            onPick={focusFacility}
+          />
+        </div>
 
-          <div className="flex-1 overflow-y-auto">
-            {(status === 'locating' || status === 'loading') && (
-              <div className="flex flex-col items-center justify-center gap-3 py-16 text-slate-400">
-                <svg className="h-8 w-8 animate-spin text-green-500" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                </svg>
-                <p className="text-sm">{status === 'locating' ? 'Getting your location…' : 'Loading facilities…'}</p>
-              </div>
-            )}
-
-            {status === 'error' && (
-              <div className="m-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">
-                ⚠ {errorMsg}
-              </div>
-            )}
-
-            {status === 'ready' && facilities.length === 0 && (
-              <p className="px-4 py-8 text-center text-sm text-slate-400">
-                No facilities found within {searchRadius} km. Try increasing the radius.
-              </p>
-            )}
-
-            {status === 'ready' && facilities.map((f) => (
-              <button
-                key={f.id}
-                onClick={() => flyToFacility(f)}
-                className={`w-full border-b border-slate-100 px-4 py-3 text-left transition hover:bg-white dark:border-slate-700 dark:hover:bg-slate-700 ${
-                  selected?.id === f.id ? 'bg-green-50 dark:bg-green-900/30' : ''
-                }`}
-              >
+        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="relative min-h-0 flex-1">
+            <div ref={containerRef} className="h-full w-full" />
+            {selected && (
+              <div className="absolute bottom-3 left-3 right-3 z-[1000] rounded-2xl bg-white p-3 shadow-xl dark:bg-slate-800 md:left-auto md:w-80">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate text-[13px] font-semibold text-slate-800 dark:text-white">{f.name}</p>
-                    <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">{f.label}</p>
+                    <p className="truncate text-sm font-semibold text-slate-800 dark:text-white">{selected.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      {selected.label}{selected.place ? ` · ${selected.place}` : ''}{showDistance ? ` · ${selected.dist.toFixed(1)} km ${distanceLabel}` : ''}
+                    </p>
                   </div>
-                  <span className="flex-shrink-0 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-semibold text-green-700">
-                    {f.dist.toFixed(1)} km
-                  </span>
+                  <button onClick={() => { setSelectedId(null); clearRoute() }} className="rounded-full p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700" aria-label="Close place">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4 w-4">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
                 </div>
-                {f.phone && <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">📞 {f.phone}</p>}
-                {f.opening && <p className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 truncate">🕐 {f.opening}</p>}
-              </button>
-            ))}
+                <div className="mt-2 flex items-center gap-2">
+                  {['driving', 'foot'].map((mode) => (
+                    <button
+                      key={mode}
+                      onClick={() => { setTravelMode(mode); routeTo(selected, mode) }}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                        travelMode === mode ? 'bg-green-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                      }`}
+                    >
+                      {mode === 'driving' ? 'Drive' : 'Walk'}
+                    </button>
+                  ))}
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {route?.loading && 'Finding the road…'}
+                    {route && !route.loading && !route.straight && `${route.minutes} min · ${route.km.toFixed(1)} km by road`}
+                    {route && !route.loading && route.straight && `${route.km.toFixed(1)} km in a straight line`}
+                    {!route && !userPos && 'Allow location to route from where you stand.'}
+                  </p>
+                </div>
+                <a
+                  href={directionsUrl(userPos, selected, travelMode)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-2 inline-flex items-center rounded-xl bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700"
+                >
+                  Directions from where I am
+                </a>
+              </div>
+            )}
+          </div>
+
+          <div className="max-h-40 overflow-y-auto border-t border-gray-100 bg-slate-50 dark:border-slate-700 dark:bg-slate-800 md:hidden">
+            <FacilityList
+              facilities={facilities}
+              selectedId={selectedId}
+              status={status}
+              errorMsg={errorMsg}
+              showDistance={showDistance}
+              onPick={focusFacility}
+            />
           </div>
         </div>
+      </div>
+    </div>
+  )
+}
 
-        {/* ── Map container ── */}
-        <div className="relative flex-1">
-          <div ref={containerRef} className="h-full w-full" />
-
-          {/* Loading overlay */}
-          {(status === 'locating' || status === 'loading') && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/70 dark:bg-slate-900/70 backdrop-blur-sm z-[999]">
-              <svg className="h-10 w-10 animate-spin text-green-600" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-              </svg>
-              <p className="mt-3 text-sm font-medium text-slate-600 dark:text-slate-300">
-                {status === 'locating' ? 'Getting your location…' : 'Loading nearby health facilities…'}
+function FacilityList({ facilities, selectedId, status, errorMsg, showDistance, onPick }) {
+  if (status === 'error') {
+    return <div className="m-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-600">{errorMsg}</div>
+  }
+  if (!facilities.length) {
+    return <p className="px-4 py-8 text-center text-sm text-slate-400">No health facilities to show yet.</p>
+  }
+  return (
+    <div className="flex-1 overflow-y-auto">
+      {facilities.map((facility) => (
+        <button
+          key={facility.id}
+          onClick={() => onPick(facility)}
+          className={`w-full border-b border-slate-100 px-4 py-3 text-left transition hover:bg-white dark:border-slate-700 dark:hover:bg-slate-700 ${
+            selectedId === facility.id ? 'bg-green-50 dark:bg-green-900/30' : ''
+          }`}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-[13px] font-semibold text-slate-800 dark:text-white">{facility.name}</p>
+              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                {facility.label}{facility.place ? ` · ${facility.place}` : ''}
               </p>
             </div>
-          )}
-
-          {/* Mobile: selected facility card */}
-          {selected && (
-            <div className="absolute bottom-4 left-4 right-4 z-[999] rounded-2xl bg-white p-4 shadow-xl md:hidden">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="font-semibold text-slate-800 dark:text-white">{selected.name}</p>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{selected.label} · {selected.dist.toFixed(1)} km away</p>
-                  {selected.phone   && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">📞 {selected.phone}</p>}
-                  {selected.opening && <p className="text-sm text-slate-500 dark:text-slate-400">🕐 {selected.opening}</p>}
-                </div>
-                <button onClick={() => setSelected(null)} className="ml-2 rounded-full p-1 text-slate-400 hover:bg-slate-100">
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-4 w-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              {selected.website && (
-                <a href={selected.website} target="_blank" rel="noopener noreferrer"
-                  className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700">
-                  Visit Website ↗
-                </a>
-              )}
-            </div>
-          )}
-
-          {/* Mobile facility count badge */}
-          {status === 'ready' && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[999] md:hidden">
-              <span className="rounded-full bg-white/90 dark:bg-slate-800/90 px-4 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 shadow-md">
-                {facilities.length} facilities within {searchRadius} km
+            {showDistance && (
+              <span className="flex-shrink-0 rounded-full bg-green-50 px-2 py-0.5 text-[11px] font-semibold text-green-700 dark:bg-green-900/40 dark:text-green-300">
+                {facility.dist.toFixed(1)} km
               </span>
-            </div>
-          )}
-        </div>
-      </div>
+            )}
+          </div>
+        </button>
+      ))}
     </div>
   )
 }
