@@ -7,7 +7,7 @@ export default function CTA({ onOpenChat, onOpenMap }) {
             Get Started Today
           </span>
 
-          <h2 className="mt-6 text-4xl font-bold leading-tight lg:text-5xl">
+          <h2 className="mt-6 text-3xl font-bold leading-tight sm:text-4xl lg:text-5xl">
             Take the first step toward better health.
           </h2>
 
@@ -16,7 +16,7 @@ export default function CTA({ onOpenChat, onOpenMap }) {
             guidance — all in one place.
           </p>
 
-          <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+          <div className="mt-10 flex w-full min-w-0 flex-col items-stretch justify-center gap-4 sm:flex-row sm:items-center">
             <button
               onClick={() => onOpenChat?.()}
               className="rounded-full bg-white px-8 py-4 font-semibold text-green-700 transition hover:bg-green-50"

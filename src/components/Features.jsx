@@ -87,7 +87,7 @@ export default function Features({ onOpenChat, onOpenMap, onOpenDoctors }) {
         </div>
 
         {/* Cards */}
-        <div className="mt-16 grid gap-8 md:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-16 grid min-w-0 gap-8 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-w-0">
           {features.map((f) => (
             <div
               key={f.id}

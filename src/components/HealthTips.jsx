@@ -157,7 +157,7 @@ export default function HealthTips() {
           </p>
         </div>
 
-        <div className="mt-16 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-16 grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-w-0">
           {tips.map((tip) => (
             <TipCard key={tip.id} tip={tip} />
           ))}

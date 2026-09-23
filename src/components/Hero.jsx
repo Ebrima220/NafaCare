@@ -11,7 +11,7 @@ export default function Hero({ onCheckSymptoms, onFindCenters }) {
             AI Assisted Healthcare
           </span>
 
-          <h1 className="mt-6 text-5xl font-extrabold leading-tight text-gray-900 dark:text-white">
+          <h1 className="mt-6 text-4xl font-extrabold leading-tight text-gray-900 sm:text-5xl dark:text-white">
             Your Private{' '}
             <span className="text-green-600">AI Health</span>{' '}
             Assistant
@@ -59,17 +59,17 @@ export default function Hero({ onCheckSymptoms, onFindCenters }) {
         </div>
 
         {/* Right Side — image + ECG */}
-        <div className="relative mt-16 flex items-center justify-center lg:mt-0">
+        <div className="relative mt-16 flex w-full min-w-0 items-center justify-center overflow-x-clip lg:mt-0 lg:w-auto">
           {/* Glow */}
-          <div className="absolute h-80 w-80 rounded-full bg-green-200 opacity-40 blur-3xl dark:bg-green-900" />
+          <div className="absolute h-80 w-80 max-w-full rounded-full bg-green-200 opacity-40 blur-3xl dark:bg-green-900" />
 
-          <div className="relative flex flex-col items-center justify-center">
+          <div className="relative flex w-full min-w-0 max-w-[420px] flex-col items-center justify-center">
             <div className="absolute h-72 w-72 rounded-full bg-green-300 opacity-30 blur-3xl dark:bg-green-800" />
 
             <img
               src="/images/stethoscope-image.jpg"
               alt="Stethoscope"
-              className="relative w-[420px] object-contain mix-blend-multiply dark:invert dark:mix-blend-multiply"
+              className="relative w-full max-w-full object-contain mix-blend-multiply dark:invert dark:mix-blend-multiply"
               style={{ filter: 'saturate(1.1)' }}
             />
 

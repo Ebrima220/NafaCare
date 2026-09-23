@@ -438,15 +438,15 @@ export default function HealthCentersMap({ open, onClose }) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-white dark:bg-slate-900">
-      <div className="flex items-center justify-between border-b border-gray-100 bg-gradient-to-r from-green-600 to-emerald-500 px-4 py-3">
-        <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center justify-between gap-2 border-b border-gray-100 bg-gradient-to-r from-green-600 to-emerald-500 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-5 w-5 text-white">
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
             <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
           </svg>
-          <div>
-            <p className="text-sm font-bold text-white leading-tight">Health Centers Near You</p>
-            <p className="text-[10px] text-green-100">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-white leading-tight">Health Centers Near You</p>
+            <p className="truncate text-[10px] text-green-100">
               {locating ? 'Finding where you are standing…' : userPos ? `You are here · accurate to about ${userPos.accuracy || 30} m` : 'The Gambia'}
             </p>
           </div>
@@ -458,8 +458,8 @@ export default function HealthCentersMap({ open, onClose }) {
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 bg-white px-4 py-2 dark:border-slate-700 dark:bg-slate-900">
-        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b border-gray-100 bg-white px-3 py-2 sm:px-4 dark:border-slate-700 dark:bg-slate-900">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
           <span className="font-medium">Radius:</span>
           {[5, 10, 20, 50, null].map((radius) => (
             <button
@@ -494,7 +494,7 @@ export default function HealthCentersMap({ open, onClose }) {
       )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="hidden md:flex w-80 flex-shrink-0 flex-col border-r border-gray-100 bg-slate-50 dark:border-slate-700 dark:bg-slate-800">
+        <div className="hidden md:flex w-72 min-w-0 shrink-0 flex-col border-r border-gray-100 bg-slate-50 lg:w-80 dark:border-slate-700 dark:bg-slate-800">
           <div className="border-b border-gray-100 px-4 py-3 dark:border-slate-700">
             <p className="text-sm font-semibold text-slate-800 dark:text-white">
               {status === 'ready' ? `${facilities.length} places` : 'Health facilities'}

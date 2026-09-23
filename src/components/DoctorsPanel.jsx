@@ -126,7 +126,7 @@ function DoctorCard({ doctor }) {
             </svg>
             {doctor.phone}
           </a>
-          <a href={`mailto:${doctor.email}`} className="flex items-center gap-1.5 text-[11px] text-slate-500 hover:text-green-600 transition-colors dark:text-slate-400 dark:hover:text-green-400">
+          <a href={`mailto:${doctor.email}`} className="flex min-w-0 items-center gap-1.5 break-all text-[11px] text-slate-500 hover:text-green-600 transition-colors dark:text-slate-400 dark:hover:text-green-400">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3 flex-shrink-0 text-slate-400 dark:text-slate-500">
               <path d="M3 4a2 2 0 0 0-2 2v1.161l8.441 4.221a1.25 1.25 0 0 0 1.118 0L19 7.162V6a2 2 0 0 0-2-2H3Z" />
               <path d="m19 8.839-7.77 3.885a2.75 2.75 0 0 1-2.46 0L1 8.839V14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8.839Z" />
@@ -172,14 +172,15 @@ export default function DoctorsPanel({ open, onClose }) {
           MOBILE  — bottom sheet: 92dvh, rounded top corners, drag handle
           DESKTOP — right sidebar: slides in from right, full height below navbar
          ════════════════════════════════════════════════════════════════════ */}
+      <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
       <div
         className={`
-          fixed z-50 flex flex-col bg-slate-50 dark:bg-slate-900 shadow-2xl
-          transition-all duration-300 ease-out
+          pointer-events-auto absolute z-50 flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden bg-slate-50 dark:bg-slate-900 shadow-2xl
+          transition-transform duration-300 ease-out
           inset-x-0 bottom-0 h-[92dvh] rounded-t-3xl
           ${open ? 'translate-y-0' : 'translate-y-full'}
           md:inset-x-auto md:right-0 md:top-[64px] md:bottom-0
-          md:h-auto md:w-[420px] md:rounded-l-2xl md:rounded-tr-none
+          md:h-auto md:w-[min(100%,420px)] md:rounded-l-2xl md:rounded-tr-none
           md:border-l md:border-gray-200 dark:md:border-slate-700
           ${open ? 'md:translate-x-0 md:translate-y-0' : 'md:translate-x-full md:translate-y-0'}
         `}
@@ -244,6 +245,7 @@ export default function DoctorsPanel({ open, onClose }) {
             More professionals joining soon · NafaCare © 2026
           </p>
         </div>
+      </div>
       </div>
     </>
   )

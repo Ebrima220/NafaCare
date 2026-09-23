@@ -37,7 +37,7 @@ export default function HowItWorks() {
         </div>
 
         {/* Steps */}
-        <div className="mt-10 grid gap-6 md:grid-cols-3">
+        <div className="mt-10 grid min-w-0 gap-6 md:grid-cols-3 [&>*]:min-w-0">
           {steps.map((step) => (
             <div
               key={step.number}

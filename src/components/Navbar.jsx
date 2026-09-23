@@ -46,7 +46,7 @@ export default function Navbar({ onSignUpProfessional, onOpenDoctors }) {
 
   return (
     <header className="sticky top-0 z-50 border-b border-gray-100 bg-white/80 backdrop-blur-lg dark:border-slate-700 dark:bg-slate-900/80">
-      <nav className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <nav className="mx-auto flex min-w-0 max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
 
         {/* ── Logo ── */}
         <a href="#home" className="flex items-center gap-2">

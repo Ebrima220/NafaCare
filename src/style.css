@@ -4,6 +4,12 @@
 
 html {
   scroll-behavior: smooth;
+  overflow-x: clip;
+}
+
+body {
+  overflow-x: clip;
+  max-width: 100%;
 }
 
 /* Tailwind's image reset stretches Leaflet tiles and pins, so markers miss the building. */

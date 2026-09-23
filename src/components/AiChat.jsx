@@ -270,15 +270,17 @@ export default function AiChat({ open, onClose }) {
         <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-300" onClick={onClose} />
       )}
 
+      {/* Clips the closed sheet so it cannot widen the page on small and medium screens. */}
+      <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
       <div
         ref={panelRef}
         className={`
-          fixed z-50 flex min-w-0 flex-col overflow-hidden bg-white dark:bg-slate-900 shadow-2xl
+          pointer-events-auto absolute z-50 flex min-w-0 max-w-full flex-col overflow-hidden bg-white dark:bg-slate-900 shadow-2xl
           transition-transform duration-300 ease-out
           inset-x-0 bottom-0 h-[92dvh] rounded-t-3xl
           ${open ? 'translate-y-0' : 'translate-y-full'}
           md:inset-x-auto md:right-0 md:top-[64px] md:bottom-0
-          md:h-auto md:w-[400px] md:rounded-l-2xl md:rounded-tr-none
+          md:h-auto md:w-[min(100%,400px)] md:rounded-l-2xl md:rounded-tr-none
           md:border-l md:border-gray-200 dark:md:border-slate-700
           ${open ? 'md:translate-x-0 md:translate-y-0' : 'md:translate-x-full md:translate-y-0'}
         `}
@@ -420,6 +422,7 @@ export default function AiChat({ open, onClose }) {
           </div>
           <p className="mt-1.5 hidden text-center text-[10px] text-slate-400 md:block dark:text-slate-500">Enter to send · Shift+Enter for new line</p>
         </div>
+      </div>
       </div>
     </>
   )
