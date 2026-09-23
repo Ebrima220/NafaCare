@@ -147,7 +147,7 @@ function MessageBubble({ msg }) {
       <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold ${isUser ? 'bg-green-600 text-white' : 'bg-emerald-100 text-green-700 dark:bg-green-900 dark:text-green-300'}`}>
         {isUser ? 'You' : 'AI'}
       </div>
-      <div className={`max-w-[82%] rounded-2xl px-3 py-2 ${isUser ? 'bg-green-600 text-white text-[13px] leading-relaxed' : 'bg-slate-50 border border-slate-100 dark:bg-slate-700 dark:border-slate-600'}`}>
+      <div className={`min-w-0 max-w-[82%] break-words rounded-2xl px-3 py-2 ${isUser ? 'bg-green-600 text-white text-[13px] leading-relaxed' : 'bg-slate-50 border border-slate-100 dark:bg-slate-700 dark:border-slate-600'}`}>
         {isUser ? <p className="text-[13px] leading-relaxed">{msg.content}</p> : <div>{renderMarkdown(msg.content)}</div>}
         {msg.streaming && <span className="inline-block h-3 w-1.5 animate-pulse rounded-sm bg-green-500 ml-0.5" />}
       </div>
@@ -170,7 +170,7 @@ export default function AiChat({ open, onClose }) {
   useEffect(() => {
     if (!open) return
     // Focusing on a phone opens the keyboard immediately and covers the send button.
-    if (window.matchMedia('(min-width: 768px)').matches) {
+    if (window.matchMedia('(min-width: 1024px)').matches) {
       const timer = setTimeout(() => inputRef.current?.focus(), 350)
       return () => clearTimeout(timer)
     }
@@ -183,7 +183,7 @@ export default function AiChat({ open, onClose }) {
     if (!viewport || !panel) return
 
     const placeAboveKeyboard = () => {
-      const desktop = window.matchMedia('(min-width: 768px)').matches
+      const desktop = window.matchMedia('(min-width: 1024px)').matches
       if (desktop) {
         panel.style.bottom = ''
         panel.style.height = ''
@@ -264,55 +264,44 @@ export default function AiChat({ open, onClose }) {
 
   const isEmpty = messages.length === 0
 
+  if (!open) return null
+
   return (
     <>
-      {open && (
-        <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-300" onClick={onClose} />
-      )}
+      <div className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
 
-      {/* Clips the closed sheet so it cannot widen the page on small and medium screens. */}
-      <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
       <div
         ref={panelRef}
-        className={`
-          pointer-events-auto absolute z-50 flex min-w-0 max-w-full flex-col overflow-hidden bg-white dark:bg-slate-900 shadow-2xl
-          transition-transform duration-300 ease-out
-          inset-x-0 bottom-0 h-[92dvh] rounded-t-3xl
-          ${open ? 'translate-y-0' : 'translate-y-full'}
-          md:inset-x-auto md:right-0 md:top-[64px] md:bottom-0
-          md:h-auto md:w-[min(100%,400px)] md:rounded-l-2xl md:rounded-tr-none
-          md:border-l md:border-gray-200 dark:md:border-slate-700
-          ${open ? 'md:translate-x-0 md:translate-y-0' : 'md:translate-x-full md:translate-y-0'}
-        `}
+        className="fixed inset-x-0 bottom-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full max-w-[100vw] min-w-0 flex-col overflow-hidden bg-white shadow-2xl dark:bg-slate-900 sm:h-[min(92dvh,100dvh)] sm:rounded-t-3xl lg:inset-y-0 lg:left-auto lg:right-0 lg:top-16 lg:h-auto lg:max-h-none lg:w-[400px] lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-gray-200 dark:lg:border-slate-700"
         role="dialog"
         aria-modal="true"
         aria-label="NafaCare AI Health Assistant"
       >
         {/* Drag handle */}
-        <div className="flex justify-center pt-3 pb-1 md:hidden" aria-hidden="true">
+        <div className="flex shrink-0 justify-center pt-3 pb-1 lg:hidden" aria-hidden="true">
           <div className="h-1 w-10 rounded-full bg-slate-200 dark:bg-slate-700" />
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between bg-gradient-to-r from-green-600 to-emerald-500 px-4 py-3 md:rounded-tl-2xl">
-          <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center justify-between gap-2 bg-gradient-to-r from-green-600 to-emerald-500 px-4 py-3 lg:rounded-tl-2xl">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.8" stroke="currentColor" className="h-5 w-5 text-white">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z" />
               </svg>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <p className="text-sm font-bold text-white leading-tight">NafaCare AI</p>
+                <p className="truncate text-sm font-bold text-white leading-tight">NafaCare AI</p>
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
                 </span>
               </div>
-              <p className="text-[11px] text-green-100">Health Research Assistant</p>
+              <p className="truncate text-[11px] text-green-100">Health Research Assistant</p>
             </div>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex shrink-0 items-center gap-1">
             {messages.length > 0 && (
               <button onClick={() => { setMessages([]); setError('') }} className="rounded-full p-2 text-green-100 hover:bg-white/20 transition" title="Clear chat">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
@@ -334,7 +323,7 @@ export default function AiChat({ open, onClose }) {
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 flex-shrink-0 text-blue-500 mt-0.5">
               <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clipRule="evenodd" />
             </svg>
-            <div className="flex-1">
+            <div className="min-w-0 flex-1">
               <p className="text-[11px] text-blue-700 dark:text-blue-400 leading-snug">
                 This AI assistant provides health guidance to help you understand symptoms and find appropriate care. Always consult qualified healthcare professionals for diagnosis and treatment.
               </p>
@@ -352,7 +341,7 @@ export default function AiChat({ open, onClose }) {
         )}
 
         {/* Messages */}
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
+        <div className="min-h-0 w-full min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4">
           {isEmpty ? (
             <div className="flex flex-col items-center justify-center h-full gap-5 py-6">
               <div className="text-center">
@@ -420,9 +409,8 @@ export default function AiChat({ open, onClose }) {
               )}
             </button>
           </div>
-          <p className="mt-1.5 hidden text-center text-[10px] text-slate-400 md:block dark:text-slate-500">Enter to send · Shift+Enter for new line</p>
+          <p className="mt-1.5 hidden text-center text-[10px] text-slate-400 lg:block dark:text-slate-500">Enter to send · Shift+Enter for new line</p>
         </div>
-      </div>
       </div>
     </>
   )

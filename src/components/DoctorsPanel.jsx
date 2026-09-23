@@ -93,7 +93,7 @@ function DoctorCard({ doctor }) {
   )}`
 
   return (
-    <div className="overflow-hidden rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md dark:bg-slate-800 max-w-xs mx-auto">
+    <div className="mx-auto w-full max-w-sm overflow-hidden rounded-2xl bg-white shadow-sm transition-shadow hover:shadow-md dark:bg-slate-800">
       <div className="p-3">
         {/* Top: avatar + info */}
         <div className="flex items-start gap-2.5">
@@ -158,52 +158,37 @@ export default function DoctorsPanel({ open, onClose }) {
     return () => { document.body.style.overflow = '' }
   }, [open])
 
+  if (!open) return null
+
   return (
     <>
-      {/* Backdrop */}
-      {open && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px] transition-opacity duration-300"
-          onClick={onClose}
-        />
-      )}
-
-      {/* ════════════════════════════════════════════════════════════════════
-          MOBILE  — bottom sheet: 92dvh, rounded top corners, drag handle
-          DESKTOP — right sidebar: slides in from right, full height below navbar
-         ════════════════════════════════════════════════════════════════════ */}
-      <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden">
       <div
-        className={`
-          pointer-events-auto absolute z-50 flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden bg-slate-50 dark:bg-slate-900 shadow-2xl
-          transition-transform duration-300 ease-out
-          inset-x-0 bottom-0 h-[92dvh] rounded-t-3xl
-          ${open ? 'translate-y-0' : 'translate-y-full'}
-          md:inset-x-auto md:right-0 md:top-[64px] md:bottom-0
-          md:h-auto md:w-[min(100%,420px)] md:rounded-l-2xl md:rounded-tr-none
-          md:border-l md:border-gray-200 dark:md:border-slate-700
-          ${open ? 'md:translate-x-0 md:translate-y-0' : 'md:translate-x-full md:translate-y-0'}
-        `}
+        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+
+      <div
+        className="fixed inset-x-0 bottom-0 z-50 flex h-[100dvh] max-h-[100dvh] w-full max-w-[100vw] min-w-0 flex-col overflow-hidden bg-slate-50 shadow-2xl dark:bg-slate-900 sm:h-[min(92dvh,100dvh)] sm:rounded-t-3xl lg:inset-y-0 lg:left-auto lg:right-0 lg:top-16 lg:h-auto lg:max-h-none lg:w-[420px] lg:rounded-none lg:rounded-l-2xl lg:border-l lg:border-gray-200 dark:lg:border-slate-700"
         role="dialog"
         aria-modal="true"
         aria-label="Talk to a Healthcare Professional"
       >
         {/* ── Drag handle (mobile only) ── */}
-        <div className="flex justify-center pt-3 pb-1 md:hidden" aria-hidden="true">
+        <div className="flex shrink-0 justify-center pt-3 pb-1 lg:hidden" aria-hidden="true">
           <div className="h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-600" />
         </div>
 
         {/* ── Header ── */}
-        <div className="flex items-center justify-between bg-gradient-to-r from-green-600 to-emerald-500 px-4 py-3 md:rounded-tl-2xl">
-          <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center justify-between gap-2 bg-gradient-to-r from-green-600 to-emerald-500 px-4 py-3 lg:rounded-tl-2xl">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.8" stroke="currentColor" className="h-5 w-5 text-white">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
               </svg>
             </div>
-            <div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <p className="text-sm font-bold text-white leading-tight">Healthcare Professionals</p>
+                <p className="truncate text-sm font-bold text-white leading-tight">Healthcare Professionals</p>
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white opacity-60" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
@@ -237,7 +222,7 @@ export default function DoctorsPanel({ open, onClose }) {
         </div>
 
         {/* ── Doctor cards ── */}
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
+        <div className="min-h-0 w-full min-w-0 flex-1 space-y-4 overflow-x-hidden overflow-y-auto overscroll-contain px-4 py-4">
           {DOCTORS.map((doc) => (
             <DoctorCard key={doc.id} doctor={doc} />
           ))}
@@ -245,7 +230,6 @@ export default function DoctorsPanel({ open, onClose }) {
             More professionals joining soon · NafaCare © 2026
           </p>
         </div>
-      </div>
       </div>
     </>
   )
