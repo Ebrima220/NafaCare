@@ -164,9 +164,47 @@ export default function AiChat({ open, onClose }) {
   const [disclaimerDismissed, setDisclaimerDismissed] = useState(false)
   const bottomRef = useRef(null)
   const inputRef  = useRef(null)
+  const panelRef  = useRef(null)
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
-  useEffect(() => { if (open) setTimeout(() => inputRef.current?.focus(), 350) }, [open])
+  useEffect(() => {
+    if (!open) return
+    // Focusing on a phone opens the keyboard immediately and covers the send button.
+    if (window.matchMedia('(min-width: 768px)').matches) {
+      const timer = setTimeout(() => inputRef.current?.focus(), 350)
+      return () => clearTimeout(timer)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const viewport = window.visualViewport
+    const panel = panelRef.current
+    if (!viewport || !panel) return
+
+    const placeAboveKeyboard = () => {
+      const desktop = window.matchMedia('(min-width: 768px)').matches
+      if (desktop) {
+        panel.style.bottom = ''
+        panel.style.height = ''
+        return
+      }
+      const keyboard = Math.max(0, window.innerHeight - viewport.offsetTop - viewport.height)
+      panel.style.bottom = `${keyboard}px`
+      // While typing, fit the sheet to the visible screen so the send button stays on it.
+      panel.style.height = keyboard > 0 ? `${Math.max(240, viewport.height - 8)}px` : ''
+    }
+
+    viewport.addEventListener('resize', placeAboveKeyboard)
+    viewport.addEventListener('scroll', placeAboveKeyboard)
+    placeAboveKeyboard()
+    return () => {
+      viewport.removeEventListener('resize', placeAboveKeyboard)
+      viewport.removeEventListener('scroll', placeAboveKeyboard)
+      panel.style.bottom = ''
+      panel.style.height = ''
+    }
+  }, [open])
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
@@ -177,6 +215,7 @@ export default function AiChat({ open, onClose }) {
     const userText = (text || input).trim()
     if (!userText || loading) return
     setInput('')
+    if (inputRef.current) inputRef.current.style.height = 'auto'
     setError('')
     const updated = [...messages, { role: 'user', content: userText }]
     setMessages(updated)
@@ -232,9 +271,10 @@ export default function AiChat({ open, onClose }) {
       )}
 
       <div
+        ref={panelRef}
         className={`
-          fixed z-50 flex flex-col bg-white dark:bg-slate-900 shadow-2xl
-          transition-all duration-300 ease-out
+          fixed z-50 flex min-w-0 flex-col overflow-hidden bg-white dark:bg-slate-900 shadow-2xl
+          transition-transform duration-300 ease-out
           inset-x-0 bottom-0 h-[92dvh] rounded-t-3xl
           ${open ? 'translate-y-0' : 'translate-y-full'}
           md:inset-x-auto md:right-0 md:top-[64px] md:bottom-0
@@ -310,7 +350,7 @@ export default function AiChat({ open, onClose }) {
         )}
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 space-y-4">
           {isEmpty ? (
             <div className="flex flex-col items-center justify-center h-full gap-5 py-6">
               <div className="text-center">
@@ -341,9 +381,9 @@ export default function AiChat({ open, onClose }) {
           <div ref={bottomRef} />
         </div>
 
-        {/* Input bar */}
-        <div className="border-t border-gray-100 bg-white px-3 py-3 pb-[env(safe-area-inset-bottom,12px)] dark:border-slate-700 dark:bg-slate-900">
-          <div className="flex items-end gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-green-400 focus-within:ring-2 focus-within:ring-green-100 transition dark:border-slate-600 dark:bg-slate-800 dark:focus-within:border-green-500 dark:focus-within:ring-green-900/40">
+        {/* Input bar. min-w-0 keeps the send button on screen while the text grows. */}
+        <div className="shrink-0 border-t border-gray-100 bg-white px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-slate-700 dark:bg-slate-900">
+          <div className="flex min-w-0 items-end gap-2 rounded-2xl border border-gray-200 bg-gray-50 px-3 py-2 focus-within:border-green-400 focus-within:ring-2 focus-within:ring-green-100 transition dark:border-slate-600 dark:bg-slate-800 dark:focus-within:border-green-500 dark:focus-within:ring-green-900/40">
             <textarea
               ref={inputRef}
               value={input}
@@ -351,8 +391,9 @@ export default function AiChat({ open, onClose }) {
               onKeyDown={handleKey}
               placeholder="Ask a health question…"
               rows={1}
+              enterKeyHint="send"
               disabled={loading}
-              className="flex-1 resize-none bg-transparent text-[13px] text-slate-700 placeholder-slate-400 outline-none disabled:opacity-50 dark:text-slate-200 dark:placeholder-slate-500"
+              className="min-w-0 flex-1 resize-none bg-transparent text-base leading-5 text-slate-700 placeholder-slate-400 outline-none disabled:opacity-50 md:text-[13px] dark:text-slate-200 dark:placeholder-slate-500"
               style={{ maxHeight: '100px' }}
               onInput={(e) => {
                 e.target.style.height = 'auto'
@@ -362,7 +403,7 @@ export default function AiChat({ open, onClose }) {
             <button
               onClick={() => sendMessage()}
               disabled={!input.trim() || loading}
-              className="flex-shrink-0 flex h-8 w-8 items-center justify-center rounded-full bg-green-600 text-white transition hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="mb-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-600 text-white transition hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"
               aria-label="Send"
             >
               {loading ? (
@@ -377,7 +418,7 @@ export default function AiChat({ open, onClose }) {
               )}
             </button>
           </div>
-          <p className="mt-1.5 text-center text-[10px] text-slate-400 dark:text-slate-500">Enter to send · Shift+Enter for new line</p>
+          <p className="mt-1.5 hidden text-center text-[10px] text-slate-400 md:block dark:text-slate-500">Enter to send · Shift+Enter for new line</p>
         </div>
       </div>
     </>
