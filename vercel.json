@@ -1,5 +1,16 @@
 {
+  "redirects": [
+    { "source": "/favicon.svg", "destination": "/nafecare-icon.png", "permanent": false }
+  ],
   "rewrites": [
     { "source": "/((?!api/|favicon|apple-touch-icon|tab-icon|site\\.webmanifest).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/(favicon.ico|nafecare-icon.png|favicon-32.png|favicon-48.png|favicon-192.png|favicon-512.png|apple-touch-icon.png|apple-touch-icon-precomposed.png|site.webmanifest)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }
+      ]
+    }
   ]
 }
