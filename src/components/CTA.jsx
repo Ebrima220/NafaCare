@@ -21,7 +21,7 @@ export default function CTA({ onOpenChat, onOpenMap }) {
               onClick={() => onOpenChat?.()}
               className="rounded-full bg-white px-8 py-4 font-semibold text-green-700 transition hover:bg-green-50"
             >
-              Check Symptoms
+              Ask NafaCare AI agent
             </button>
             <button
               onClick={() => onOpenMap?.()}

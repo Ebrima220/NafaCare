@@ -9,7 +9,7 @@ const navLinks = [
   { label: 'Health Tips',         href: '#health-tips'   },
 ]
 
-export default function Navbar({ onSignUpProfessional, onOpenDoctors }) {
+export default function Navbar({ onOpenDoctors }) {
   const [menuOpen,   setMenuOpen]   = useState(false)
   const [activeHash, setActiveHash] = useState('#home')
   const [dark, setDark] = useDarkMode()
@@ -36,12 +36,6 @@ export default function Navbar({ onSignUpProfessional, onOpenDoctors }) {
 
   function handleLinkClick() {
     setMenuOpen(false)
-  }
-
-  function handleSignUp(e) {
-    e.preventDefault()
-    setMenuOpen(false)
-    onSignUpProfessional?.()
   }
 
   return (
@@ -103,17 +97,6 @@ export default function Navbar({ onSignUpProfessional, onOpenDoctors }) {
                 <path fillRule="evenodd" d="M7.455 2.004a.75.75 0 0 1 .26.77 7 7 0 0 0 9.958 7.967.75.75 0 0 1 1.067.853A8.5 8.5 0 1 1 6.647 1.921a.75.75 0 0 1 .808.083Z" clipRule="evenodd" />
               </svg>
             )}
-          </button>
-
-          {/* Join as a Provider */}
-          <button
-            onClick={(e) => e.preventDefault()}
-            className="flex items-center gap-2 rounded-full bg-green-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-green-700 active:scale-[0.97]"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-              <path d="M11 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM2.046 15.253c-.058.468.172.92.57 1.137a6.979 6.979 0 0 0 3.384.86 6.979 6.979 0 0 0 3.384-.86.75.75 0 0 0 .57-1.137 6.978 6.978 0 0 0-7.908 0ZM12.75 7.75a.75.75 0 0 0 0 1.5h2.25V11.5a.75.75 0 0 0 1.5 0V9.25h2.25a.75.75 0 0 0 0-1.5h-2.25V5.5a.75.75 0 0 0-1.5 0v2.25h-2.25Z" />
-            </svg>
-            Join as a Provider
           </button>
         </div>
 
@@ -183,19 +166,6 @@ export default function Navbar({ onSignUpProfessional, onOpenDoctors }) {
                 </li>
               )
             )}
-
-            {/* Mobile CTA — live but no-op */}
-            <li className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
-              <button
-                onClick={(e) => e.preventDefault()}
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-700 active:scale-[0.97]"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
-                  <path d="M11 5a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM2.046 15.253c-.058.468.172.92.57 1.137a6.979 6.979 0 0 0 3.384.86 6.979 6.979 0 0 0 3.384-.86.75.75 0 0 0 .57-1.137 6.978 6.978 0 0 0-7.908 0ZM12.75 7.75a.75.75 0 0 0 0 1.5h2.25V11.5a.75.75 0 0 0 1.5 0V9.25h2.25a.75.75 0 0 0 0-1.5h-2.25V5.5a.75.75 0 0 0-1.5 0v2.25h-2.25Z" />
-                </svg>
-                Join as a Provider
-              </button>
-            </li>
           </ul>
         </div>
       )}

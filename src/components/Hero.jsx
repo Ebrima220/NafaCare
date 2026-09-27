@@ -28,7 +28,7 @@ export default function Hero({ onCheckSymptoms, onFindCenters }) {
               onClick={onCheckSymptoms}
               className="rounded-xl bg-green-600 px-7 py-4 font-semibold text-white transition hover:bg-green-700 active:scale-[0.98]"
             >
-              Check Symptoms
+              Ask NafaCare AI agent
             </button>
             <button
               onClick={onFindCenters}
