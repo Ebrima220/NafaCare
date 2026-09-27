@@ -13,10 +13,11 @@ For health questions:
 - Use at most 4 short bullets and one "Bottom line" sentence.
 - No disclaimer. The app shows that separately.`
 
-// Gemini 3 Flash thinks before it writes, which adds seconds. 2.5 Flash with
-// thinking off, then Flash-Lite, starts the reply much sooner.
-const DEFAULT_MODEL = 'gemini-2.5-flash'
-const FALLBACK_MODEL = 'gemini-3.5-flash-lite'
+// Flash-Lite does not sit and think. A standard Flash or Pro model was taking
+// about 30 seconds, which is too slow for a chat box.
+const FAST_MODEL = 'gemini-2.5-flash-lite'
+const BACKUP_MODEL = 'gemini-3.5-flash-lite'
+const ATTEMPT_MS = 8000
 
 const MISSING_KEY_ERROR =
   'The AI assistant is not configured. In Vercel, open Settings → Environment Variables, add GEMINI_API_KEY, then redeploy.'
@@ -38,22 +39,15 @@ export function getApiKey() {
 }
 
 function candidateModels() {
-  const preferred = (process.env.GEMINI_MODEL || '').trim()
-  const names = [cachedModel, preferred || DEFAULT_MODEL, FALLBACK_MODEL]
-  const unique = []
-  for (const name of names) {
-    if (name && !unique.includes(name)) unique.push(name)
-  }
-  // The first model answers. The second is tried only if that model name is unavailable.
-  return unique.slice(0, 2)
+  // Ignore GEMINI_MODEL. A Pro or regular Flash name in Vercel was the slow path.
+  const names = cachedModel ? [cachedModel] : [FAST_MODEL, BACKUP_MODEL]
+  return names
 }
 
-// Gemini 2.5 can turn thinking fully off. Newer Flash models cannot, so use their lowest level.
 function generationConfig(model) {
   const id = String(model || '').toLowerCase()
-  const config = { maxOutputTokens: 384 }
-  if (/gemini-2\./.test(id)) config.thinkingConfig = { thinkingBudget: 0 }
-  else if (/gemini-3\.(7|8)/.test(id) || id.includes('pro')) config.thinkingConfig = { thinkingLevel: 'low' }
+  const config = { maxOutputTokens: 220 }
+  if (id.includes('lite') && id.includes('2.5')) config.thinkingConfig = { thinkingBudget: 0 }
   else config.thinkingConfig = { thinkingLevel: 'minimal' }
   return config
 }
@@ -64,7 +58,7 @@ function normalizeMessages(messages) {
   }
 
   // Older turns add delay and are not needed for the next short answer.
-  let recent = messages.slice(-4)
+  let recent = messages.slice(-2)
   if (recent[0]?.role === 'assistant') recent = recent.slice(1)
 
   const contents = []
@@ -101,6 +95,7 @@ async function streamModel(model, apiKey, contents, onText) {
         contents,
         generationConfig: generationConfig(model),
       }),
+      signal: AbortSignal.timeout(ATTEMPT_MS),
     },
   )
 
@@ -184,6 +179,8 @@ function sseStream(contents, apiKey) {
               send({ error: DOWN_ERROR })
               return
             }
+            // A hung model must not be followed by another long wait.
+            if (error?.name === 'TimeoutError' || error?.name === 'AbortError') break
             continue
           }
 
@@ -257,6 +254,7 @@ export async function writeChatToNodeResponse(res, messages) {
       if (!res.write(value)) {
         await new Promise((resolve) => res.once('drain', resolve))
       }
+      if (typeof res.flush === 'function') res.flush()
     }
     res.end()
   } catch (error) {
