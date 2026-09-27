@@ -44,10 +44,7 @@ export default function Navbar({ onOpenDoctors }) {
 
         {/* ── Logo ── */}
         <a href="#home" className="flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="h-8 w-8 text-green-600">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 21s-7-4.35-9.5-8.5A5.5 5.5 0 0112 4a5.5 5.5 0 019.5 8.5C19 16.65 12 21 12 21z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v6m-3-3h6" />
-          </svg>
+          <img src="/images/nafacare-mark.png" alt="" className="h-9 w-9" />
           <span className="text-2xl font-bold text-slate-800 dark:text-white">
             Nafa<span className="text-green-600">Care</span>
           </span>
