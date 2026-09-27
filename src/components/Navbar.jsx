@@ -43,11 +43,8 @@ export default function Navbar({ onOpenDoctors }) {
       <nav className="mx-auto flex min-w-0 max-w-7xl items-center justify-between gap-3 px-4 py-4 sm:px-6">
 
         {/* ── Logo ── */}
-        <a href="#home" className="flex items-center gap-2">
-          <img src="/images/nafacare-mark.png" alt="" className="h-9 w-9" />
-          <span className="text-2xl font-bold text-slate-800 dark:text-white">
-            Nafa<span className="text-green-600">Care</span>
-          </span>
+        <a href="#home" className="flex items-center">
+          <img src="/images/nafacare-logo-trimmed.png" alt="NafaCare" className="h-14 w-auto rounded-md bg-white" />
         </a>
 
         {/* ── Desktop nav links ── */}
