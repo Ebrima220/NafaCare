@@ -14,10 +14,14 @@ For health questions:
 - No disclaimer. The app shows that separately.`
 
 // Flash-Lite does not sit and think. A standard Flash or Pro model was taking
-// about 30 seconds, which is too slow for a chat box.
-const FAST_MODEL = 'gemini-2.5-flash-lite'
-const BACKUP_MODEL = 'gemini-3.5-flash-lite'
+// about 30 seconds, which is too slow for a chat box. 2.5 Flash-Lite now
+// returns "no longer available", so the first call is 3.5 Flash-Lite.
+const FAST_MODEL = 'gemini-3.5-flash-lite'
+const BACKUP_MODEL = 'gemini-3.1-flash-lite'
 const ATTEMPT_MS = 8000
+// The backup model starts only when the first has not spoken yet. A reply that
+// arrives before this still uses one request, so the usual fast path stays fast.
+const HEDGE_AFTER_MS = 2500
 
 const MISSING_KEY_ERROR =
   'The AI assistant is not configured. In Vercel, open Settings → Environment Variables, add GEMINI_API_KEY, then redeploy.'
@@ -38,10 +42,24 @@ export function getApiKey() {
   )
 }
 
-function candidateModels() {
+function modelOrder() {
   // Ignore GEMINI_MODEL. A Pro or regular Flash name in Vercel was the slow path.
-  const names = cachedModel ? [cachedModel] : [FAST_MODEL, BACKUP_MODEL]
-  return names
+  const primary = cachedModel || FAST_MODEL
+  const backup = primary === BACKUP_MODEL ? FAST_MODEL : BACKUP_MODEL
+  return [primary, backup]
+}
+
+function anySignal(signals) {
+  const controller = new AbortController()
+  for (const signal of signals) {
+    if (!signal) continue
+    if (signal.aborted) {
+      controller.abort()
+      return controller.signal
+    }
+    signal.addEventListener('abort', () => controller.abort(), { once: true })
+  }
+  return controller.signal
 }
 
 function generationConfig(model) {
@@ -81,7 +99,7 @@ async function readError(response) {
   return errJson?.error?.message || ''
 }
 
-async function streamModel(model, apiKey, contents, onText) {
+async function streamModel(model, apiKey, contents, onText, signal) {
   const response = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
     {
@@ -95,7 +113,7 @@ async function streamModel(model, apiKey, contents, onText) {
         contents,
         generationConfig: generationConfig(model),
       }),
-      signal: AbortSignal.timeout(ATTEMPT_MS),
+      signal,
     },
   )
 
@@ -154,60 +172,106 @@ function sseStream(contents, apiKey) {
       const send = (obj) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`))
       }
-      let sentText = false
+      let winner = null
+      let hedgeTimer = null
+      const deadline = AbortSignal.timeout(ATTEMPT_MS)
+      const models = modelOrder()
+      const stops = models.map(() => new AbortController())
+
+      const run = (index) => {
+        const signal = anySignal([deadline, stops[index].signal])
+        return streamModel(
+          models[index],
+          apiKey,
+          contents,
+          (text) => {
+            if (winner !== null && winner !== index) return
+            if (winner === null) {
+              winner = index
+              stops.forEach((stop, stopIndex) => {
+                if (stopIndex !== index) stop.abort()
+              })
+              if (hedgeTimer) clearTimeout(hedgeTimer)
+            }
+            send({ text })
+          },
+          signal,
+        ).then(
+          (result) => ({ index, lost: false, ...result }),
+          (error) => {
+            const lost = stops[index].signal.aborted && winner !== index
+            if (!lost) console.error(`Gemini ${models[index]} stream error:`, error?.message || error)
+            const timedOut = error?.name === 'TimeoutError' || error?.name === 'AbortError'
+            return {
+              index,
+              ok: false,
+              lost,
+              status: timedOut ? 408 : 0,
+              detail: error?.message || '',
+            }
+          },
+        )
+      }
 
       try {
         // A comment frame makes proxies flush the headers before the model replies.
         controller.enqueue(encoder.encode(': stream\n\n'))
 
-        let sawRateLimit = false
-        for (const model of candidateModels()) {
-          let result = null
-          try {
-            result = await streamModel(
-              model,
-              apiKey,
-              contents,
-              (text) => {
-                sentText = true
-                send({ text })
-              },
-            )
-          } catch (error) {
-            console.error(`Gemini ${model} stream error:`, error?.message || error)
-            if (sentText) {
-              send({ error: DOWN_ERROR })
-              return
-            }
-            // A hung model must not be followed by another long wait.
-            if (error?.name === 'TimeoutError' || error?.name === 'AbortError') break
-            continue
-          }
-
-          if (result?.ok) {
-            cachedModel = model
-            send({ done: true })
-            return
-          }
-          if (sentText) {
-            send({ error: EMPTY_ERROR })
-            return
-          }
-          if (result?.status === 401 || result?.status === 403) {
-            send({ error: BAD_KEY_ERROR })
-            return
-          }
-          if (result?.status === 429) {
-            sawRateLimit = true
-            break
-          }
+        let backup = null
+        const startBackup = () => {
+          if (backup || winner !== null) return
+          backup = run(1)
         }
 
-        send({ error: sawRateLimit ? BUSY_ERROR : DOWN_ERROR })
+        const primary = run(0)
+        hedgeTimer = setTimeout(startBackup, HEDGE_AFTER_MS)
+        const primaryResult = await primary
+        if (hedgeTimer) clearTimeout(hedgeTimer)
+
+        if (winner === 0) {
+          if (primaryResult.ok) {
+            cachedModel = models[0]
+            send({ done: true })
+          } else {
+            send({ error: primaryResult.detail === 'empty' ? EMPTY_ERROR : DOWN_ERROR })
+          }
+          return
+        }
+
+        if (winner === null && (primaryResult.status === 401 || primaryResult.status === 403)) {
+          stops[1].abort()
+          send({ error: BAD_KEY_ERROR })
+          return
+        }
+
+        // The first model failed before any words. The backup still has to finish
+        // inside the same 8 second limit.
+        if (winner === null) startBackup()
+
+        if (!backup) {
+          send({ error: primaryResult.status === 429 ? BUSY_ERROR : DOWN_ERROR })
+          return
+        }
+
+        const backupResult = await backup
+        if (winner === 1 && backupResult.ok) {
+          cachedModel = models[1]
+          send({ done: true })
+          return
+        }
+        if (winner === 1) {
+          send({ error: DOWN_ERROR })
+          return
+        }
+
+        const rateLimited = primaryResult.status === 429 || backupResult.status === 429
+        const empty = primaryResult.detail === 'empty' && backupResult.detail === 'empty'
+        send({ error: rateLimited ? BUSY_ERROR : empty ? EMPTY_ERROR : DOWN_ERROR })
       } catch (error) {
         console.error('Gemini stream error:', error?.message || error)
-        if (!sentText) send({ error: DOWN_ERROR })
+        if (winner === null) send({ error: DOWN_ERROR })
       } finally {
+        if (hedgeTimer) clearTimeout(hedgeTimer)
         controller.close()
       }
     },
